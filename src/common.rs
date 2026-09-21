@@ -100,7 +100,6 @@ pub mod bitstream;
 pub mod bs_element_id;
 pub mod channel_map_descr;
 pub mod channel_order;
-mod checked_cast;
 pub mod dct;
 pub mod enums;
 pub mod fft;

@@ -105,8 +105,7 @@ amm-info@iis.fraunhofer.de
 //!   960, 1024
 //! * DCT II: 8, 12, 16, 20, 24, 32, 40, 48, 64, 96, 120, 128
 
-use crate::common::checked_cast;
-use crate::common::fft::fft;
+use crate::common::fft::{fft, MAX_FFT_LENGTH};
 use crate::common::tables::sine_tables;
 use crate::common::tables::window_tables;
 use itertools::izip;
@@ -165,8 +164,15 @@ pub fn dctiv(data: &mut [f32]) {
     }
 
     // fft
-    let complex_data = checked_cast::mut_complex_f32_from_f32(data);
-    fft(&mut complex_data[0..fft_len]);
+    let mut complex_data = [Complex::<f32>::default(); MAX_FFT_LENGTH];
+    let complex_data = &mut complex_data[..fft_len];
+    for (complex, pair) in izip!(complex_data.iter_mut(), data.chunks_exact(2)) {
+        *complex = Complex { re: pair[0], im: pair[1] };
+    }
+    fft(complex_data);
+    for (pair, complex) in izip!(data.chunks_exact_mut(2), complex_data.iter()) {
+        (pair[0], pair[1]) = (complex.re, complex.im);
+    }
 
     // post-twiddling
     let mut sin_step = 0;

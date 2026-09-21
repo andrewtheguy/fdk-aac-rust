@@ -113,11 +113,6 @@ use crate::common::{
 };
 use crate::tp_dec::TransportDec;
 use itertools::izip;
-use std::mem::size_of;
-use zerocopy::FromBytes;
-
-/// Size of work buffer section.
-const WB_SECTION_SIZE: usize = constants::MAX_FRAMESIZE * 2 * size_of::<u32>();
 
 // -- Common data structures -- //
 
@@ -138,13 +133,10 @@ bitflags! {
 /// Common Channel Data.
 ///
 /// This structure is used for common data of CPE/SCE.
-#[repr(C, align(4))]
 #[derive(Debug)]
 pub struct CommonChannelData {
-    // The scratch_work_buffer is re-used as a [f32] and an [i16] buffer. Therefore, always make
-    // sure that the buffer is memory aligned with std::mem::align_of::<f32>() and
-    // std::mem::align_of::<i16>()
-    scratch_work_buffer: [u8; WB_SECTION_SIZE],
+    /// The quantized spectrum of the channel being read.
+    quantized_spectrum: [i16; constants::MAX_FRAMESIZE],
     sr_info: SamplingRateInfo,
 }
 
@@ -152,7 +144,7 @@ impl Default for CommonChannelData {
     // Default trait.
     fn default() -> Self {
         Self {
-            scratch_work_buffer: [0_u8; WB_SECTION_SIZE],
+            quantized_spectrum: [0; constants::MAX_FRAMESIZE],
             sr_info: SamplingRateInfo::default(),
         }
     }
@@ -343,9 +335,7 @@ impl ChannelElement {
 
         let bs = &mut tp_dec.bs;
         let frame_length = spectral_data.len();
-        let quantized_spectrum =
-            <[i16]>::mut_from_bytes(&mut common_channel_data.scratch_work_buffer)
-                .expect("Cannot interpret the scratch buffer as i16 slice");
+        let quantized_spectrum = &mut common_channel_data.quantized_spectrum;
 
         if self.num_channels == 1 {
             self.channel_info[channel].global_gain = bs.read(8) as u8;
@@ -590,37 +580,5 @@ impl ChannelElement {
         }
 
         AacDecoderError::Ok
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::mem::{align_of, size_of};
-
-    #[test]
-    fn test_buff_alignment_w_f32() {
-        let ccd = CommonChannelData::default();
-
-        let scratch_buff =
-            &ccd.scratch_work_buffer[..(2 * constants::MAX_FRAMESIZE * size_of::<f32>())];
-
-        assert!(scratch_buff.len() % size_of::<f32>() == 0);
-
-        let addr_of_val = std::ptr::addr_of!(scratch_buff);
-        assert!(addr_of_val as usize % align_of::<f32>() == 0);
-    }
-
-    #[test]
-    fn test_buff_alignment_w_i16() {
-        let frame_length = 1024;
-        let ccd = CommonChannelData::default();
-
-        let scratch_buff = &ccd.scratch_work_buffer[..(frame_length * size_of::<i16>())];
-
-        assert!(scratch_buff.len() % size_of::<i16>() == 0);
-
-        let addr_of_val = std::ptr::addr_of!(scratch_buff);
-        assert!(addr_of_val as usize % align_of::<i16>() == 0);
     }
 }

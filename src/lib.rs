@@ -116,6 +116,7 @@ amm-info@iis.fraunhofer.de
 //! }
 //! ```
 
+#![forbid(unsafe_code)]
 #![expect(clippy::approx_constant)]
 #![expect(clippy::excessive_precision)]
 

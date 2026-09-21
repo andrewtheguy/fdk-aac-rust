@@ -475,6 +475,9 @@ fn fft_16(data: &mut [Complex<f32>]) {
 fft_n2!(240, 16, 15);
 dit_fft!(256, 512);
 
+/// The longest FFT `fft` performs.
+pub const MAX_FFT_LENGTH: usize = 256;
+
 /// Perform an inplace complex valued FFT of length `data.len()`
 ///
 /// # Parameters
