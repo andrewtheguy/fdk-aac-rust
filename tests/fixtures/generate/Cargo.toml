@@ -1,0 +1,15 @@
+# Regenerates the streams in the directory above. Not part of the `aac` crate: it
+# links the FDK AAC encoder through the sibling `fdk-aac-prebuilt` checkout, which
+# needs an archive of its own (`FDK_AAC_PREBUILT_DIR=../fdk-aac-prebuilt/dist/<target>`).
+#
+#     cargo run --release --manifest-path tests/fixtures/generate/Cargo.toml -- tests/fixtures
+[package]
+name = "generate-eld-fixtures"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+sys = { package = "fdk-aac-prebuilt-sys", path = "../../../../fdk-aac-prebuilt/crates/fdk-aac-prebuilt-sys" }
+
+[workspace]

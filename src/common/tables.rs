@@ -94,7 +94,6 @@ amm-info@iis.fraunhofer.de
 //! Commonly used tables
 
 pub mod channel_map_descriptors;
-#[cfg(feature = "aac_dec")]
 pub mod ld_filter_bank_tables;
 pub mod pow_4_over_3;
 pub use pow_4_over_3::{POW_4_OVER_3, POW_4_OVER_3_TABLESIZE};
