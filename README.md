@@ -69,8 +69,33 @@ the `f32` output, the frame geometry and the error sequence with `tests/fixtures
 same input. The streams were encoded with FDK AAC 2.0.3 as AAC-ELD without SBR: 48 kHz
 stereo with 480-sample frames at several bitrates and signal types (the Apple Screen
 Sharing shape), plus 512-sample frames, 44.1 and 32 kHz, and mono.
-`tests/fixtures/generate` is the program that made them; it needs the encoder, so it is
-not part of the crate.
+
+To hear it, `cargo run --release --example decode -- STREAM.rawpkts OUT.wav` decodes a
+stream to a 16-bit WAV; a `.rawpkts` file is a little-endian `i32` length and the
+AudioSpecificConfig, then a length and an access unit, repeated.
+
+`tools/reference` checks the decoder against Fraunhofer's C codec. It links FDK AAC
+2.0.3 through a sibling `fdk-aac-prebuilt` checkout, so it is not part of the crate:
+
+```sh
+export FDK_AAC_PREBUILT_DIR=$PWD/../fdk-aac-prebuilt/dist/linux-x86_64
+alias eld-reference='cargo run --release --manifest-path tools/reference/Cargo.toml --'
+
+# any audio, through the C encoder, as AAC-ELD without SBR (128 kbit/s, 480-sample frames)
+ffmpeg -i IN -ar 48000 -ac 2 -c:a pcm_s16le in.wav
+eld-reference encode in.wav in.rawpkts [BITRATE] [FRAME]
+
+# this decoder against the C decoder, stream by stream
+eld-reference compare tests/fixtures/*.rawpkts in.rawpkts
+
+# the fixtures themselves, byte for byte
+eld-reference fixtures tests/fixtures
+```
+
+The C decoder is 16-bit fixed point and this one is floating point, so `compare` passes
+a stream whose outputs are within two 16-bit steps of each other or 70 dB apart; on the
+fixtures they are 76 to 87 dB apart. It takes undamaged streams only, as the two
+decoders conceal with different random noise.
 
 ## Licence
 
