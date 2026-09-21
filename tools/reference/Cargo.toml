@@ -1,0 +1,17 @@
+# The decoder checked against Fraunhofer's own C codec. Not part of the `aac` crate:
+# it links FDK AAC 2.0.3 through the sibling `fdk-aac-prebuilt` checkout, which needs
+# an archive of its own (`FDK_AAC_PREBUILT_DIR=../fdk-aac-prebuilt/dist/<target>`).
+#
+#     cargo run --release --manifest-path tools/reference/Cargo.toml -- help
+[package]
+name = "eld-reference"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aac = { path = "../.." }
+fdk-aac = { package = "fdk-aac-prebuilt", path = "../../../fdk-aac-prebuilt/crates/fdk-aac-prebuilt" }
+sys = { package = "fdk-aac-prebuilt-sys", path = "../../../fdk-aac-prebuilt/crates/fdk-aac-prebuilt-sys" }
+
+[workspace]
