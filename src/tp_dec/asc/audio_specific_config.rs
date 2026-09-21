@@ -95,7 +95,7 @@ amm-info@iis.fraunhofer.de
 
 use super::super::{callbacks::TpDecCallBacks, error_codes::TpDecoderError, pce::ProgramConfig};
 use super::{
-    eld_specific_config::EldSpecificConfig,
+    eld_specific_config,
     ga_specific_config::GaSpecificConfig,
     helper_functions::{get_aot, get_sample_rate},
     UsacConfig,
@@ -149,7 +149,6 @@ pub struct AudioSpecificConfig {
     /// General audio specific configuration.
     ga_specific_config: GaSpecificConfig,
     /// ELD specific configuration.
-    eld_specific_config: EldSpecificConfig,
     /// USAC specific configuration.
     usac_config: UsacConfig,
     /// Flags indicating if:
@@ -174,7 +173,6 @@ impl AudioSpecificConfig {
         self.sampling_frequency_index = 0xf;
         self.extension_audio_object_type = AudioObjectType::AotNullObject;
         self.ac_flags = ACFlags::empty();
-        self.eld_specific_config.set_downscale_factor(1);
         self.progr_config_element.init();
     }
 
@@ -186,7 +184,6 @@ impl AudioSpecificConfig {
 
         self.progr_config_element.reset();
         self.ga_specific_config.reset();
-        self.eld_specific_config.reset();
         self.usac_config.reset();
     }
 
@@ -218,24 +215,11 @@ impl AudioSpecificConfig {
         } else {
             self.aot = get_aot(bs);
 
+            // ER AAC ELD is the one object type this decoder takes.
             match self.aot {
-                AudioObjectType::AotAacLc => (),
-                AudioObjectType::AotSbr => self.ac_flags.insert(ACFlags::SBR_PRESENT),
-                AudioObjectType::AotErAacLc => self.ac_flags.insert(ACFlags::ER),
-                AudioObjectType::AotErAacScal => {
-                    self.ac_flags.insert(ACFlags::ER | ACFlags::SCALABLE);
-                }
-                AudioObjectType::AotErAacLd => {
-                    self.ac_flags.insert(ACFlags::ER | ACFlags::LD);
-                }
-                AudioObjectType::AotPs => {
-                    self.ac_flags
-                        .insert(ACFlags::PS_PRESENT | ACFlags::SBR_PRESENT);
-                }
                 AudioObjectType::AotErAacEld => {
                     self.ac_flags.insert(ACFlags::ER | ACFlags::ELD);
                 }
-                AudioObjectType::AotUsac => self.ac_flags.insert(ACFlags::USAC),
                 _ => error_status = Err(TpDecoderError::UnsupportedFormat),
             };
 
@@ -250,7 +234,8 @@ impl AudioSpecificConfig {
             self.channel_configuration = bs.read(4) as u8;
 
             if self.ac_flags.contains(ACFlags::ER) {
-                if self.channel_configuration == 0 {
+                // Mono and stereo only.
+                if self.channel_configuration == 0 || self.channel_configuration > 2 {
                     return Err(TpDecoderError::UnsupportedFormat);
                 }
                 if self.ac_flags.contains(ACFlags::SCALABLE) && self.channel_configuration > 2 {
@@ -285,16 +270,10 @@ impl AudioSpecificConfig {
             }
 
             if self.ac_flags.contains(ACFlags::ELD) {
-                error_status = self.eld_specific_config.parse(
-                    self.sampling_frequency,
-                    self.channel_configuration,
-                    &mut self.ac_flags,
-                    bs,
-                    cb,
-                );
+                error_status =
+                    eld_specific_config::parse(self.sampling_frequency, &mut self.ac_flags, bs);
                 error_status?;
-                self.extension_sampling_frequency =
-                    self.sampling_frequency << self.eld_specific_config.sbr_sampling_rate();
+                self.extension_sampling_frequency = self.sampling_frequency;
             }
 
             if self.ac_flags.contains(ACFlags::ER) && bs.read(2) > 0 {
@@ -470,11 +449,9 @@ impl AudioSpecificConfig {
         }
     }
 
-    /// Returns downscale factor.
+    /// Returns ELD downscale factor, which is always one: the downscaled mode is
+    /// refused.
     pub fn ds_factor(&self) -> u8 {
-        if self.ac_flags.contains(ACFlags::ELD) {
-            return self.eld_specific_config.downscale_factor();
-        }
         1
     }
 
@@ -534,7 +511,6 @@ mod tests {
         assert!(asc.extension_audio_object_type == AudioObjectType::AotNullObject);
         assert!(asc.aot == AudioObjectType::AotNone);
         assert!(asc.ac_flags == ACFlags::empty());
-        assert!(asc.eld_specific_config.downscale_factor() == 1);
         assert!(asc.channel_configuration == 0);
         assert!(asc.sampling_frequency == 0);
         assert!(asc.extension_sampling_frequency == 0);
@@ -551,7 +527,6 @@ mod tests {
         assert!(asc.extension_audio_object_type == AudioObjectType::AotNullObject);
         assert!(asc.aot == AudioObjectType::AotNullObject);
         assert!(asc.ac_flags == ACFlags::empty());
-        assert!(asc.eld_specific_config.downscale_factor() == 0);
     }
 
     #[test]

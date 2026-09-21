@@ -106,8 +106,6 @@ const TP_USAC_MAX_EXT_ELEMENTS: usize = 8;
 const TP_USAC_MAX_CH_ELEMENTS: usize = 1;
 /// Maximum number USAC elements.
 pub const TP_USAC_MAX_ELEMENTS: usize = TP_USAC_MAX_CH_ELEMENTS + TP_USAC_MAX_EXT_ELEMENTS;
-/// Indicates non-availability of the 3-bit syntax element coreSbrFrameLengthIndex (e.g. in ELD).
-pub(super) const TPDEC_CORE_SBR_FRAME_LENGTH_INDEX_NONE: u8 = 8;
 
 /// Maximum supported out of band config size in byte.
 pub const MAX_CONF_SIZE: usize = 1024;

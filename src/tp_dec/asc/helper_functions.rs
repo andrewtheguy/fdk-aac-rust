@@ -93,10 +93,8 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! ASC helper functions
 
-use super::super::{ProgramConfig, TpDecoderError};
 use crate::common::aot::AudioObjectType;
 use crate::common::bitstream::Bitstream;
-use crate::common::bs_element_id::ChannelElementId;
 use crate::common::samplerate_index::SAMPLING_RATE_TABLE;
 
 /// Returns `AudioObjectType`.
@@ -160,29 +158,10 @@ pub(super) fn skip_sbr_header(bs: &mut Bitstream, is_usac: bool) {
     bs.push(num_bits);
 }
 
-/// Returns element's list.
-///
-/// # Parameters
-///
-/// - `channel_config`: MPEG-4 channel configuration.
-/// - `element_list`: Buffer to store element list.
-pub(super) fn get_element_list(
-    channel_config: u32,
-    element_list: &mut [ChannelElementId],
-) -> Result<(), TpDecoderError> {
-    let mut tmp_pce = ProgramConfig::new();
-
-    if tmp_pce.get_default_mpeg_config(channel_config) {
-        tmp_pce.get_element_list(element_list);
-        Ok(())
-    } else {
-        Err(TpDecoderError::ParseError)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::bs_element_id::ChannelElementId;
     use crate::common::bitstream::Mode;
 
     #[test]
