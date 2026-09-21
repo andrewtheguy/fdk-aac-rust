@@ -149,30 +149,6 @@ pub static SINE_TABLE_32: [Complex<f32>; 17] = [
   Complex { re: 0.707106781, im: 0.707106781 },
 ];
 #[rustfmt::skip]
-pub static SINE_TABLE_48: [Complex<f32>; 25] = [
-
-  Complex { re: 1.000000000, im: 0.000000000 }, Complex { re: 0.999464587, im: 0.032719083 }, Complex { re: 0.997858923, im: 0.065403129 }, Complex { re: 0.995184727, im: 0.098017140 },
-  Complex { re: 0.991444861, im: 0.130526192 }, Complex { re: 0.986643332, im: 0.162895473 }, Complex { re: 0.980785280, im: 0.195090322 }, Complex { re: 0.973876979, im: 0.227076263 },
-  Complex { re: 0.965925826, im: 0.258819045 }, Complex { re: 0.956940336, im: 0.290284677 }, Complex { re: 0.946930129, im: 0.321439465 }, Complex { re: 0.935905927, im: 0.352250048 },
-  Complex { re: 0.923879533, im: 0.382683432 }, Complex { re: 0.910863825, im: 0.412707030 }, Complex { re: 0.896872742, im: 0.442288690 }, Complex { re: 0.881921264, im: 0.471396737 },
-  Complex { re: 0.866025404, im: 0.500000000 }, Complex { re: 0.849202182, im: 0.528067851 }, Complex { re: 0.831469612, im: 0.555570233 }, Complex { re: 0.812846685, im: 0.582477697 },
-  Complex { re: 0.793353340, im: 0.608761429 }, Complex { re: 0.773010453, im: 0.634393284 }, Complex { re: 0.751839807, im: 0.659345815 }, Complex { re: 0.729864073, im: 0.683592302 },
-  Complex { re: 0.707106781, im: 0.707106781 },
-];
-#[rustfmt::skip]
-pub static SINE_TABLE_64: [Complex<f32>; 33] = [
-
-  Complex { re: 1.000000000, im: 0.000000000 }, Complex { re: 0.999698819, im: 0.024541229 }, Complex { re: 0.998795456, im: 0.049067674 }, Complex { re: 0.997290457, im: 0.073564564 },
-  Complex { re: 0.995184727, im: 0.098017140 }, Complex { re: 0.992479535, im: 0.122410675 }, Complex { re: 0.989176510, im: 0.146730474 }, Complex { re: 0.985277642, im: 0.170961889 },
-  Complex { re: 0.980785280, im: 0.195090322 }, Complex { re: 0.975702130, im: 0.219101240 }, Complex { re: 0.970031253, im: 0.242980180 }, Complex { re: 0.963776066, im: 0.266712757 },
-  Complex { re: 0.956940336, im: 0.290284677 }, Complex { re: 0.949528181, im: 0.313681740 }, Complex { re: 0.941544065, im: 0.336889853 }, Complex { re: 0.932992799, im: 0.359895037 },
-  Complex { re: 0.923879533, im: 0.382683432 }, Complex { re: 0.914209756, im: 0.405241314 }, Complex { re: 0.903989293, im: 0.427555093 }, Complex { re: 0.893224301, im: 0.449611330 },
-  Complex { re: 0.881921264, im: 0.471396737 }, Complex { re: 0.870086991, im: 0.492898192 }, Complex { re: 0.857728610, im: 0.514102744 }, Complex { re: 0.844853565, im: 0.534997620 },
-  Complex { re: 0.831469612, im: 0.555570233 }, Complex { re: 0.817584813, im: 0.575808191 }, Complex { re: 0.803207531, im: 0.595699304 }, Complex { re: 0.788346428, im: 0.615231591 },
-  Complex { re: 0.773010453, im: 0.634393284 }, Complex { re: 0.757208847, im: 0.653172843 }, Complex { re: 0.740951125, im: 0.671558955 }, Complex { re: 0.724247083, im: 0.689540545 },
-  Complex { re: 0.707106781, im: 0.707106781 },
-];
-#[rustfmt::skip]
 pub static SINE_TABLE_80: [Complex<f32>; 41] = [
 
   Complex { re: 1.000000000, im: 0.000000000 }, Complex { re: 0.999807240, im: 0.019633692 }, Complex { re: 0.999229036, im: 0.039259816 }, Complex { re: 0.998265610, im: 0.058870804 },

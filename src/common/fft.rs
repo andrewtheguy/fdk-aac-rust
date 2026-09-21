@@ -884,19 +884,6 @@ dit_fft!(512, 512);
 /// # Parameters
 ///
 /// - `data`: Input/Output data buffer.
-///
-/// # Examples
-/// ```
-/// use aac::common::fft;
-/// use num_complex::Complex;
-///
-/// const N: usize = 4;
-/// let mut data: [Complex<f32>; N] = [Complex { re: 1.0, im: 0.0 }; N];
-///
-/// fft::fft(&mut data); // will perform fft_4()
-///
-/// assert!(data[0] == Complex { re: 4.0, im: 0.0 });
-/// ```
 pub fn fft(data: &mut [Complex<f32>]) {
     match data.len() {
         2 => fft_2(data),

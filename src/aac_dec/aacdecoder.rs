@@ -99,7 +99,6 @@ use crate::{
         error_codes::AacDecoderError,
         interleaver,
         output_info::OutputInfo,
-        params::Params,
         process::{InitState, Process},
     },
     common::{
@@ -239,7 +238,6 @@ impl AacDecoder {
     ///
     /// - `tp_dec_option`: Optional transport decoder.
     /// - `time_data`: Time domain audio samples (output buffer).
-    /// - `params`: Decoder parameters.
     /// - `flags`: AAC Decoder flags.
     ///
     /// # Return
@@ -249,7 +247,6 @@ impl AacDecoder {
         &mut self,
         tp_dec_option: Option<&mut TransportDec>,
         time_data: &mut [f32],
-        params: &mut Params,
         flags: AACDecFlags,
     ) -> Result<OutputInfo, (AacDecoderError, OutputInfo)> {
         let mut error_status = AacDecoderError::Ok;
@@ -265,9 +262,11 @@ impl AacDecoder {
             return self.create_output_info(Err(AacDecoderError::Unknown));
         }
 
-        // Check and apply parameter changes.
-        if let Err(e) = self.params_update(params) {
-            return self.create_output_info(Err(e));
+        // Reallocate the output data workbuffer if necessary.
+        self.reinit();
+
+        if !self.map_descr.is_valid() {
+            return self.create_output_info(Err(AacDecoderError::UnsupportedChannelconfig));
         }
 
         self.aac_core.reset();
@@ -312,34 +311,6 @@ impl AacDecoder {
         } else {
             Err((error_status, output_info))
         }
-    }
-
-    /// Checks and applies parameter changes, if necessary. This function might re-allocate heap
-    /// memory.
-    ///
-    /// # Parameters
-    ///
-    /// - `params`: Decoder parameters.
-    ///
-    /// # Return
-    ///
-    /// - `Result<(), AacDecoderError>`
-    pub(super) fn params_update(&mut self, params: &mut Params) -> Result<(), AacDecoderError> {
-        // In case of a config change restore all parameters.
-        if self.aac_core.init_state() == InitState::Startup {
-            params.restore();
-        }
-
-        self.aac_core.param_update(params, self.config.ac_flags)?;
-
-        // Reallocate the output data workbuffer if necessary.
-        self.reinit();
-
-        if !self.map_descr.is_valid() {
-            return Err(AacDecoderError::UnsupportedChannelconfig);
-        }
-
-        Ok(())
     }
 
     /// Re-initializes the output data workbuffer, if necessary. This function might re-allocate

@@ -94,26 +94,25 @@ amm-info@iis.fraunhofer.de
 //! Advanced audio coding (AAC) decoder
 
 // Modules
-pub mod aacdecoder;
-pub mod block;
-pub mod channel;
-pub mod channel_info;
-pub mod conceal;
-pub mod config;
-pub mod constants;
-pub mod error_codes;
-pub mod huff_dec;
-pub mod intensity;
-pub mod interleaver;
-pub mod inverse_quantization;
-pub mod ms_stereo;
-pub mod output_info;
-pub mod params;
-pub mod pns;
-pub mod process;
-pub mod sr_info;
-pub mod tns;
-pub mod utils;
+mod aacdecoder;
+mod block;
+mod channel;
+mod channel_info;
+mod conceal;
+mod config;
+mod constants;
+mod error_codes;
+mod huff_dec;
+mod intensity;
+mod interleaver;
+mod inverse_quantization;
+mod ms_stereo;
+mod output_info;
+mod pns;
+mod process;
+mod sr_info;
+mod tns;
+mod utils;
 
 // Re-exports
 pub use crate::{
@@ -124,7 +123,7 @@ pub use crate::{
 
 // Imports
 use crate::{
-    aac_dec::{aacdecoder::AacDecoder, conceal::A_CONCEAL_AU, params::Params},
+    aac_dec::{aacdecoder::AacDecoder, conceal::A_CONCEAL_AU},
     common::{bitstream::Bitstream, flags::AACDecFlags},
     tp_dec::{ReconfigState, TransportDec},
 };
@@ -132,9 +131,6 @@ use crate::{
 /// AAC decoder instance.
 #[derive(Debug)]
 pub struct AacDecoderInstance {
-    /// Parameters for the AAC decoder.
-    params: Params,
-
     /// AAC decoder handle.
     aac_decoder: AacDecoder,
 
@@ -152,7 +148,6 @@ impl AacDecoderInstance {
     /// Creates a new `AacDecoderInstance` instance.
     pub fn new() -> AacDecoderInstance {
         AacDecoderInstance {
-            params: Params::new(),
             aac_decoder: AacDecoder::new(),
             transport_decoder: TransportDec::new(),
         }
@@ -190,7 +185,6 @@ impl AacDecoderInstance {
         self.aac_decoder.process(
             Some(&mut self.transport_decoder),
             time_data,
-            &mut self.params,
             AACDecFlags::empty(),
         )
     }
@@ -286,7 +280,7 @@ impl AacDecoderInstance {
         self.clear();
 
         self.aac_decoder
-            .process(None, time_data, &mut self.params, AACDecFlags::FLUSH)
+            .process(None, time_data, AACDecFlags::FLUSH)
     }
 
     /// Triggers the built-in error concealment to generate substitute signal for
@@ -304,6 +298,6 @@ impl AacDecoderInstance {
         time_data: &mut [f32],
     ) -> Result<OutputInfo, (AacDecoderError, OutputInfo)> {
         self.aac_decoder
-            .process(None, time_data, &mut self.params, AACDecFlags::CONCEAL)
+            .process(None, time_data, AACDecFlags::CONCEAL)
     }
 }

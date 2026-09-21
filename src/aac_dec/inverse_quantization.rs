@@ -113,39 +113,6 @@ use itertools::{izip, Itertools};
 ///
 /// # Return
 /// - `AacDecoderError`
-///
-/// # Examples
-/// ```
-/// use aac::aac_dec::{
-///     channel_info::IcsInfo, constants::MAX_WINS_X_SFBS,
-///     inverse_quantization::inverse_quantize_spectral_data, utils,
-/// };
-/// use aac::common::quantize::MAX_QUANTIZED_VALUE;
-///
-/// // input data
-/// let mut quant_spectrum: Vec<i16> = Vec::new();
-/// let qboundry: i16 = MAX_QUANTIZED_VALUE as i16;
-/// for i in -qboundry..=qboundry {
-///     quant_spectrum.push(i);
-/// }
-///
-/// // output data
-/// let mut inv_quant_spectrum: Vec<f32> = vec![0.0; quant_spectrum.len()];
-///
-/// let ics: IcsInfo = Default::default();
-/// let cbook = [utils::CBTYPE_BOOKSCL; MAX_WINS_X_SFBS];
-/// let scalefactors = [21_i16; MAX_WINS_X_SFBS];
-/// let mut band_is_noise = [false; MAX_WINS_X_SFBS];
-///
-/// inverse_quantize_spectral_data(
-///     &ics,
-///     &cbook,
-///     &scalefactors,
-///     &quant_spectrum,
-///     &mut inv_quant_spectrum,
-///     &mut band_is_noise,
-/// );
-/// ```
 pub fn inverse_quantize_spectral_data(
     ics_info: &IcsInfo,
     code_book: &[u8],

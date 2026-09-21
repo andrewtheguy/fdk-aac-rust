@@ -98,9 +98,9 @@ amm-info@iis.fraunhofer.de
 
 #[cfg(feature = "aac_dec")]
 pub mod aac_dec;
-pub mod common;
+mod common;
 #[cfg(feature = "aac_dec")]
-pub mod tp_dec;
+mod tp_dec;
 
 #[doc(hidden)]
 pub fn dummy_call() {

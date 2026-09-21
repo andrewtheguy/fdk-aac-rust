@@ -246,7 +246,4 @@ impl From<i32> for AudioObjectType {
 }
 
 impl AudioObjectType {
-    pub fn is_lowdelay_aot(&self) -> bool {
-        *self == AudioObjectType::AotErAacLd || *self == AudioObjectType::AotErAacEld
-    }
 }

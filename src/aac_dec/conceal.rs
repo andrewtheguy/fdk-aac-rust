@@ -132,6 +132,5 @@ mod conceal_params;
 
 // re-exports
 pub(crate) use conceal_constants::A_CONCEAL_AU;
-pub use conceal_constants::{AacDecoderRenderMode, ConcealmentState, MAX_NUM_FADE_FACTORS};
+pub use conceal_constants::AacDecoderRenderMode;
 pub use conceal_data::ConcealmentData;
-pub use conceal_params::{ConcealmentMethod, ConcealmentParams};

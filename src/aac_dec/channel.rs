@@ -159,10 +159,6 @@ impl Default for CommonChannelData {
 }
 
 impl CommonChannelData {
-    /// Returns default initialized CommonChannelData instance.
-    pub fn new() -> Self {
-        Default::default()
-    }
 
     /// Initializes CommonChannelData instance.
     ///
@@ -542,7 +538,6 @@ impl ChannelElement {
     ///
     /// # Parameters
     ///
-    /// - `common_channel_data`: Common channel data.
     /// - `conceal_data`: Concealment data.
     /// - `spectral_data`: Spectral data.
     /// - `time_data`: Rendered time domain signal.
@@ -556,7 +551,6 @@ impl ChannelElement {
     #[expect(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
-        common_channel_data: &mut CommonChannelData,
         conceal_data: &mut ConcealmentData,
         spectral_data: &mut [f32],
         time_data: &mut [f32],
@@ -585,7 +579,6 @@ impl ChannelElement {
             // Conceal defective spectral data.
             conceal_data.apply(
                 &mut ch_info.ics_info,
-                &common_channel_data.sr_info,
                 &mut spec[..frame_size],
                 &mut prev_spec[..frame_size],
                 &mut ch_info.render_mode,
@@ -622,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_buff_alignment_w_f32() {
-        let ccd = CommonChannelData::new();
+        let ccd = CommonChannelData::default();
 
         let scratch_buff =
             &ccd.scratch_work_buffer[..(2 * constants::MAX_FRAMESIZE * size_of::<f32>())];
@@ -636,7 +629,7 @@ mod tests {
     #[test]
     fn test_buff_alignment_w_i16() {
         let frame_length = 1024;
-        let ccd = CommonChannelData::new();
+        let ccd = CommonChannelData::default();
 
         let scratch_buff = &ccd.scratch_work_buffer[..(frame_length * size_of::<i16>())];
 

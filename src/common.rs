@@ -95,8 +95,6 @@ amm-info@iis.fraunhofer.de
 
 pub mod aot;
 #[cfg(feature = "aac_dec")]
-pub mod arith_ops;
-#[cfg(feature = "aac_dec")]
 pub mod audio_channel_type;
 pub mod bitbuffer;
 pub mod bitstream;

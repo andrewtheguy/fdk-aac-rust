@@ -123,18 +123,6 @@ impl ChannelMapDescriptor {
     ///   None, then mapping based on ch_map_order will be used.
     /// - `ch_map_order`: Set the channel order (given by map_info_tab) to MPEG, WAV or CICP.
     ///   Default: WAV.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::common::channel_map_descr::ChannelMapDescriptor;
-    /// use aac::common::channel_order::ChannelOrder;
-    ///
-    /// let mut channel_map_descr = ChannelMapDescriptor::new();
-    /// let map_info_tab = None;
-    /// let ch_map_order = ChannelOrder::Wav;
-    /// channel_map_descr.init(map_info_tab, ch_map_order);
-    /// ```
     pub fn init(
         &mut self,
         map_info_tab: Option<&'static [ChannelMapInfo]>,
@@ -229,6 +217,7 @@ pub struct ChannelMapInfo {
 
 impl ChannelMapInfo {
     /// Creates a ChannelMapInfo instance.
+    #[cfg(test)]
     pub fn new() -> ChannelMapInfo {
         Default::default()
     }

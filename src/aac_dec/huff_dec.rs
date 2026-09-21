@@ -608,28 +608,6 @@ static AAC_CODE_BOOK_DESCRIPTION_TABLE: [HuffmanDecoder; 13] = [
 /// The `HuffmanDecoder` can be used to either read a single codeword,
 /// or to read a series of codewords into provided `buffer`.
 /// The `Codebook` table to be used is selected during `HuffmanDecoder` creation.
-///
-/// # Examples
-///
-/// ```
-/// use aac::aac_dec::huff_dec::HuffmanDecoder;
-/// use aac::common::bitstream::{Bitstream, Mode};
-///
-/// let mut decoded_buffer = vec![0; 16];
-/// let bit_buffer = vec![0; 8];
-/// let mut bs = Bitstream::new(bit_buffer.len(), Mode::Reader);
-/// bs.init(&bit_buffer, 64);
-///
-/// let codebook = 12;
-/// let huff_dec = HuffmanDecoder::new(codebook);
-/// // read a single codeword
-/// let decoded_word = huff_dec.read_word(&mut bs);
-///
-/// let codebook = 1;
-/// let huff_dec = HuffmanDecoder::new(codebook);
-/// // read a series of codewords
-/// huff_dec.read_buf(&mut bs, &mut decoded_buffer);
-/// ```
 #[repr(C)]
 #[derive(Debug)]
 pub struct HuffmanDecoder {

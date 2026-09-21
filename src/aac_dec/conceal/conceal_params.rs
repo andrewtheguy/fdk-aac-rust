@@ -97,31 +97,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 
 use itertools::izip;
 
-use crate::aac_dec::error_codes::AacDecoderError;
-
 use super::conceal_constants::{self, FadeDirection};
-
-#[repr(C)]
-#[derive(Default, Debug, PartialEq, PartialOrd, Copy, Clone)]
-pub enum ConcealmentMethod {
-    #[default]
-    None = -1,
-    Mute = 0,
-    Noise = 1,
-    Inter = 2,
-}
-
-impl From<i32> for ConcealmentMethod {
-    fn from(value: i32) -> Self {
-        match value {
-            -1 => ConcealmentMethod::None,
-            0 => ConcealmentMethod::Mute,
-            1 => ConcealmentMethod::Noise,
-            2 => ConcealmentMethod::Inter,
-            _ => ConcealmentMethod::None,
-        }
-    }
-}
 
 /// Concealment Parameters
 #[repr(C)]
@@ -129,12 +105,10 @@ impl From<i32> for ConcealmentMethod {
 pub struct ConcealmentParams {
     pub(super) fade_out_factor: [f32; conceal_constants::MAX_NUM_FADE_FACTORS],
     pub(super) fade_in_factor: [f32; conceal_constants::MAX_NUM_FADE_FACTORS],
-    pub(super) method: ConcealmentMethod,
     pub(super) num_fade_out_frames: i32,
     pub(super) num_fade_in_frames: i32,
     pub(super) num_mute_release_frames: i32,
     pub(super) comfort_noise_level: f32,
-    pub has_changed: bool,
 }
 
 /// Default trait.
@@ -143,13 +117,11 @@ impl Default for ConcealmentParams {
         let mut params = Self {
             fade_out_factor: Default::default(),
             fade_in_factor: Default::default(),
-            method: ConcealmentMethod::None,
             num_fade_out_frames: conceal_constants::DFLT_FADEOUT_FRAMES,
             num_fade_in_frames: conceal_constants::DFLT_FADEIN_FRAMES,
             num_mute_release_frames: conceal_constants::DFLT_MUTE_RELEASE_FRAMES,
             comfort_noise_level: conceal_constants::DFLT_COMF_NOISE_LEVEL_FL
                 / conceal_constants::MAX_COMF_NOISE_LEVEL,
-            has_changed: true,
         };
 
         // Init fade factors (symmetric).
@@ -170,159 +142,10 @@ impl Default for ConcealmentParams {
 
 // Methods of ConcealmentParams.
 impl ConcealmentParams {
-    /// Creates new ConcealmentParams instance.
-    pub fn new() -> Self {
-        ConcealmentParams::default()
-    }
 
     /// Initializes the pre-allocated ConcealmentParams to default values.
     pub fn init(&mut self) {
         *self = Default::default();
-    }
-
-    /// Sets concealment method.
-    pub fn set_conceal_method(&mut self, method: ConcealmentMethod) -> Result<(), AacDecoderError> {
-        // Set concealment technique.
-        match method {
-            ConcealmentMethod::Mute | ConcealmentMethod::Noise | ConcealmentMethod::Inter => {
-                self.method = method;
-                self.has_changed = true;
-                Ok(())
-            }
-            ConcealmentMethod::None => Err(AacDecoderError::SetParamFail),
-        }
-    }
-
-    /// Returns the concealment method setting.
-    pub fn conceal_method(&self) -> ConcealmentMethod {
-        self.method
-    }
-
-    /// Sets number of frames for fade-out slope.
-    pub fn set_num_fadeout_frames(&mut self, num_frames: usize) -> Result<(), AacDecoderError> {
-        // Set number of frames for fade-out slope.
-        if num_frames < conceal_constants::MAX_NUM_FADE_FACTORS {
-            self.num_fade_out_frames = num_frames as i32;
-            self.has_changed = true;
-            Ok(())
-        } else {
-            Err(AacDecoderError::SetParamFail)
-        }
-    }
-
-    /// Sets number of frames for fade-in slope.
-    pub fn set_num_fadein_frames(&mut self, num_frames: usize) -> Result<(), AacDecoderError> {
-        // Set number of frames for fade-in slope.
-        if num_frames < conceal_constants::MAX_NUM_FADE_FACTORS {
-            self.num_fade_in_frames = num_frames as i32;
-            self.has_changed = true;
-            Ok(())
-        } else {
-            Err(AacDecoderError::SetParamFail)
-        }
-    }
-
-    /// Sets number of error-free frames after which the muting will be released.
-    pub fn set_num_mute_release_frames(
-        &mut self,
-        num_frames: usize,
-    ) -> Result<(), AacDecoderError> {
-        if num_frames < (conceal_constants::MAX_NUM_FADE_FACTORS << 1) {
-            self.num_mute_release_frames = num_frames as i32;
-            self.has_changed = true;
-            Ok(())
-        } else {
-            Err(AacDecoderError::SetParamFail)
-        }
-    }
-
-    /// Sets comfort noise level which will be inserted while in state 'muting'.
-    /// The noise level should be >= 0.0_f32.
-    pub fn set_comfort_noise_level(&mut self, noise_level: f32) -> Result<(), AacDecoderError> {
-        if noise_level < 0.0_f32 {
-            Err(AacDecoderError::SetParamFail)
-        } else {
-            self.comfort_noise_level = noise_level / conceal_constants::MAX_COMF_NOISE_LEVEL;
-            self.has_changed = true;
-            Ok(())
-        }
-    }
-
-    /// Sets fade-in attenuation values based on attenuation factors.
-    /// Length of attenuation vector should be 'conceal_constants::MAX_NUM_FADE_FACTORS'
-    /// Quantized (attenuation) factor value should be in range
-    /// [0..conceal_constants::MAX_QUANT_FACTOR].
-    ///
-    /// # Parameters
-    ///
-    /// - `attenu_factors`: Attenuation factor values for fade-in
-    pub fn set_fadein_attenuation_vector(
-        &mut self,
-        attenu_factors: &[i16],
-    ) -> Result<(), AacDecoderError> {
-        // Fade-in factors.
-        Self::set_param_attenuation_vector(
-            &mut self.fade_in_factor[..],
-            attenu_factors,
-            &mut self.has_changed,
-        )
-    }
-
-    /// Sets fade-out attenuation values based on attenuation factors.
-    /// Length of attenuation vector should be 'conceal_constants::MAX_NUM_FADE_FACTORS'
-    /// Quantized (attenuation) factor value should be in range
-    /// [0..conceal_constants::MAX_QUANT_FACTOR].
-    ///
-    /// # Parameters
-    ///
-    /// - `attenu_factors`: Attenuation factor values for fade-out
-    pub fn set_fadeout_attenuation_vector(
-        &mut self,
-        attenu_factors: &[i16],
-    ) -> Result<(), AacDecoderError> {
-        // Fade-out factors.
-        Self::set_param_attenuation_vector(
-            &mut self.fade_out_factor[..],
-            attenu_factors,
-            &mut self.has_changed,
-        )
-    }
-
-    /// Calculates attenuation values based on vec_values.
-    /// Updates fade_factor and update_flag in case of success.
-    ///
-    /// # Parameters
-    ///
-    /// - `fade_factor`: Fade_in / Fade_out vector from ConcealmentParams
-    /// - `attenuation_factors`: Attenuation factor values
-    /// - `update_flag`: ConcealmentParams update flag, set it to true after updating fade_factor,
-    ///   else do nothing.
-    fn set_param_attenuation_vector(
-        fade_factor: &mut [f32],
-        attenuation_factors: &[i16],
-        update_flag: &mut bool,
-    ) -> Result<(), AacDecoderError> {
-        // Checks quantized factors first.
-        for item_val in attenuation_factors
-            .iter()
-            .take(conceal_constants::MAX_NUM_FADE_FACTORS)
-        {
-            if (*item_val < 0) || (*item_val > conceal_constants::MAX_QUANT_FACTOR) {
-                return Err(AacDecoderError::SetParamFail);
-            }
-        }
-
-        // Fade factors.
-        for (fade_val, n_val) in izip!(fade_factor.iter_mut(), attenuation_factors.iter())
-            .take(conceal_constants::MAX_NUM_FADE_FACTORS)
-        {
-            *fade_val = f32::powf(
-                conceal_constants::MIN_ATTENUATION_FACTOR_025_FL,
-                (*n_val).into(),
-            );
-        }
-        *update_flag = true;
-        Ok(())
     }
 
     /// Finds next fading frame in case of changing fading direction.

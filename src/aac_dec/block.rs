@@ -119,22 +119,6 @@ use itertools::izip;
 /// Returns `AacDecoderError` type
 /// - `AacDecOk` on success
 /// - `AacDecInvalidCodeBook`, `AacDecDecodeFrameError`, `AacDecParseError` on failure
-///
-/// # Examples
-///
-/// ```
-/// use aac::aac_dec::{block::read_section_data, channel_info::IcsInfo, constants};
-/// use aac::common::bitstream::{Bitstream, Mode};
-///
-/// let bit_buffer = vec![0; 8];
-/// let mut bs_reader = Bitstream::new(bit_buffer.len(), Mode::Reader);
-/// bs_reader.init(&bit_buffer, 64);
-/// let ics_info = IcsInfo::new();
-/// let mut code_book = vec![0_u8; constants::MAX_WINS_X_SFBS];
-/// let common_window = true;
-///
-/// let error_status = read_section_data(&mut bs_reader, &ics_info, &mut code_book, common_window);
-/// ```
 pub fn read_section_data(
     bs: &mut Bitstream,
     ics_info: &IcsInfo,
@@ -204,33 +188,6 @@ pub fn read_section_data(
 /// Returns `AacDecoderError` type
 /// - `AacDecOk` on success
 /// - `AacDecParseError` on failure
-///
-/// # Examples
-///
-/// ```
-/// use aac::aac_dec::{
-///     block::read_scalefactor_data, channel_info::IcsInfo, constants, pns::PnsData,
-/// };
-/// use aac::common::bitstream::{Bitstream, Mode};
-///
-/// let bit_buffer = vec![0; 8];
-/// let mut bs_reader = Bitstream::new(bit_buffer.len(), Mode::Reader);
-/// bs_reader.init(&bit_buffer, 64);
-/// let ics_info = IcsInfo::new();
-/// let global_gain = 0_i16;
-/// let code_book = vec![0_u8; constants::MAX_WINS_X_SFBS];
-/// let mut scale_factor = vec![0_i16; constants::MAX_WINS_X_SFBS];
-/// let mut pns_data = PnsData::default();
-///
-/// let error_status = read_scalefactor_data(
-///     &mut bs_reader,
-///     &ics_info,
-///     global_gain,
-///     &code_book,
-///     &mut scale_factor,
-///     &mut pns_data,
-/// );
-/// ```
 pub fn read_scalefactor_data(
     bs: &mut Bitstream,
     ics_info: &IcsInfo,
@@ -308,22 +265,6 @@ pub fn read_scalefactor_data(
 ///
 /// Returns `AacDecoderError` type
 /// - `AacDecOk` on success
-///
-/// # Examples
-///
-/// ```
-/// use aac::aac_dec::{block::read_spectral_data, channel_info::IcsInfo, constants};
-/// use aac::common::bitstream::{Bitstream, Mode};
-///
-/// let bit_buffer = vec![0; 8];
-/// let mut bs_reader = Bitstream::new(bit_buffer.len(), Mode::Reader);
-/// bs_reader.init(&bit_buffer, 64);
-/// let ics_info = IcsInfo::new();
-/// let code_book = vec![0_u8; constants::MAX_WINS_X_SFBS];
-/// let mut spectrum = vec![0_i16; constants::MAX_FRAMESIZE];
-///
-/// let error_status = read_spectral_data(&mut bs_reader, &ics_info, &code_book, &mut spectrum);
-/// ```
 pub fn read_spectral_data(
     bs: &mut Bitstream,
     ics_info: &IcsInfo,

@@ -103,13 +103,12 @@ use crate::{
         config::Config,
         error_codes::{AacDecoderError, Cluster},
         output_info::OutputInfo,
-        params::Params,
         sr_info::SamplingRateInfo,
     },
     common::{
         bs_element_id::ChannelElementId,
         channel_map_descr::ChannelMapDescriptor,
-        flags::{AACDecFlags, ACFlags},
+        flags::AACDecFlags,
     },
     tp_dec::{ReconfigState, TransportDec},
 };
@@ -371,32 +370,6 @@ impl Process {
         self.create_output_info(decode_state, decoder_config, map_descr)
     }
 
-    /// Update parameters if something has changed.
-    ///
-    /// # Parameters
-    ///
-    /// - `ac_flags`: Audio codec flags.
-    ///
-    /// # Return
-    ///
-    /// - `Result<(), AacDecoderError>`.
-    pub fn param_update(
-        &mut self,
-        params: &mut Params,
-        ac_flags: ACFlags,
-    ) -> Result<(), AacDecoderError> {
-        if params.conceal.has_changed {
-            self.conceal_data
-                .params_update(&mut params.conceal, ac_flags);
-        }
-        Ok(())
-    }
-
-    /// Gets the current delay in frames.
-    pub fn frame_delay(&self) -> u8 {
-        self.conceal_data.delay()
-    }
-
     /// Gets decoder initialization state.
     pub fn init_state(&self) -> InitState {
         self.init_state
@@ -554,7 +527,6 @@ impl Process {
 
             if AacDecoderError::Ok
                 != el.render(
-                    &mut self.common_channel_data,
                     &mut self.conceal_data,
                     this_spectral_data,
                     this_time_data,
@@ -619,8 +591,6 @@ impl Process {
             output_info.sampling_rate = decoder_config.sampling_frequency;
             output_info.frame_size = decoder_config.samples_per_frame;
             output_info.num_channels = self.num_core_channels;
-            output_info.output_delay =
-                self.frame_delay() as u32 * decoder_config.samples_per_frame as u32;
 
             for c in 0..output_info.num_channels {
                 let mapped_channel = usize::from(

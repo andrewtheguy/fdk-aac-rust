@@ -110,26 +110,6 @@ use itertools::{izip, Itertools};
 ///
 /// # Return
 /// `()`
-///
-/// # Examples
-/// ```
-/// use aac::aac_dec::intensity::*;
-/// use aac::aac_dec::{channel_info::IcsInfo, constants, utils};
-///
-/// let ics_info: IcsInfo = Default::default();
-/// let code_book = [utils::CBTYPE_INTENSITY_HCB; constants::MAX_WINS_X_SFBS];
-/// let scale_factors = [1_i16; constants::MAX_WINS_X_SFBS];
-/// let ms_used = [0_u8; constants::MAX_WINS_X_SFBS];
-/// let mut spectrum = [0_f32; 2 * constants::MAX_FRAMESIZE];
-///
-/// apply_is(
-///     &ics_info,
-///     &code_book,
-///     &scale_factors,
-///     &ms_used,
-///     &mut spectrum,
-/// );
-/// ```
 pub fn apply_is(
     ics_info: &IcsInfo,
     code_book: &[u8],

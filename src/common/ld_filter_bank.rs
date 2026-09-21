@@ -206,17 +206,6 @@ fn mult_e2_dinv_f(
 /// - `data`: input signal. Data will be invalid after call.
 /// - `out`: output data in time domain
 /// - `overlap_buffer`: overlap buffer. Length must be 3/2*data.len().
-///
-/// # Examples
-/// ```
-/// use aac::common::ld_filter_bank;
-///
-/// let mut data = [0.0_f32; 480];
-/// let mut out = [0.0_f32; 480];
-/// let mut overlap_buffer = [0.0_f32; 720];
-///
-/// ld_filter_bank::synthesize(&mut data, &mut out, &mut overlap_buffer);
-/// ```
 pub fn synthesize(data: &mut [f32], out: &mut [f32], overlap_buffer: &mut [f32]) {
     let n = data.len();
 

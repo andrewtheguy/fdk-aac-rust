@@ -94,6 +94,10 @@ amm-info@iis.fraunhofer.de
 //! Bit stream reading and writing
 //!
 //! High-level functions for handling `Bitbuffer`
+//!
+//! The decoder only reads; the writer half builds the bitstreams the unit tests read.
+
+#![cfg_attr(not(test), allow(dead_code))]
 
 use super::bitbuffer;
 
@@ -117,19 +121,6 @@ impl Default for Mode {
 }
 
 /// Bitstream Reader and Bitstream Writer
-///
-/// # Examples
-///
-/// ```
-/// use aac::common::bitstream::{Bitstream, Mode};
-///
-/// let mut bitstream_writer = Bitstream::new(8, Mode::Writer);
-/// bitstream_writer.write(0b1011_0001, 8);
-///
-/// let mut bitstream_reader = Bitstream::new(bitstream_writer.buffer().len(), Mode::Reader);
-/// bitstream_reader.init(bitstream_writer.buffer(), 8);
-/// let value = bitstream_reader.read(4);
-/// ```
 #[derive(Default, PartialEq, Debug)]
 #[repr(C)]
 pub struct Bitstream {
@@ -170,11 +161,6 @@ impl Bitstream {
         self.bits_in_cache = 0;
     }
 
-    /// Destroys the dynamic allocated Bitstream memory
-    pub fn destroy(&mut self) {
-        self.bit_buffer.destroy()
-    }
-
     /// Resets all relevant Bitstream states and its underlying Bitbuffer
     pub fn reset(&mut self) {
         self.bit_buffer.reset();
@@ -210,27 +196,6 @@ impl Bitstream {
         }
         self.bits_in_cache -= 1;
         (self.cache >> self.bits_in_cache) & 0x1
-    }
-
-    /// read an integer value using a varying number of bits from the bitstream
-    /// q.v. ISO/IEC 23003-3:2020  Table 19
-    ///
-    /// # Parameters
-    ///
-    /// - `num_bits1`: Number of bits to read for a small integer value or escape value
-    /// - `num_bits2`: Number of bits to read for a medium sized integer value or escape value
-    /// - `num_bits3`: Number of bits to read for a large integer value or escape value
-    pub fn escaped_value(&mut self, num_bits1: u8, num_bits2: u8, num_bits3: u8) -> u32 {
-        debug_assert!(num_bits1 <= 16 && num_bits2 <= 16 && num_bits3 <= 16);
-        let mut value = self.read(num_bits1);
-        if value == (1 << num_bits1) - 1 {
-            let value_add = self.read(num_bits2);
-            value += value_add;
-            if value_add == (1 << num_bits2) - 1 {
-                value += self.read(num_bits3);
-            }
-        }
-        value
     }
 
     /// Writes a value with a certain number of bits to Bitstream

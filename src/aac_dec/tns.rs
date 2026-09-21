@@ -202,6 +202,7 @@ impl TnsData {
     ///
     /// - `sr_index`: Sampling rate index
     /// - `ac_flags`: Audio codec flag
+    #[cfg(test)]
     pub fn new(sr_index: usize, ac_flags: ACFlags) -> TnsData {
         let mut tns_data = TnsData::default();
         tns_data.init(sr_index, ac_flags);
@@ -232,15 +233,6 @@ impl TnsData {
     }
 
     /// Reset TNS data
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::tns::TnsData;
-    ///
-    /// let mut tns_data = TnsData::default();
-    /// tns_data.reset();
-    /// ```
     pub fn reset(&mut self) {
         self.filter = Default::default();
         self.num_of_filters = Default::default();
@@ -248,32 +240,11 @@ impl TnsData {
         self.is_active = false;
     }
 
-    /// Returns true if TNS data is present, otherwise false
-    pub fn is_data_present(&self) -> bool {
-        self.is_data_present
-    }
-
     /// Read TNS data present flag from bitstream and update flag in TNS struct
     ///
     /// # Parameters
     ///
     /// - `bs`: Bitstream instance in reader mode with valid internal data
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::tns::TnsData;
-    /// use aac::common::bitstream::{Bitstream, Mode};
-    ///
-    /// // Precondition, should have a valid Bitstream instance in reader mode
-    /// let buffer = vec![0; 8];
-    /// let mut bitstream_reader = Bitstream::new(buffer.len(), Mode::Reader);
-    /// bitstream_reader.init(&buffer, 8);
-    ///
-    /// let mut tns_data = TnsData::default();
-    /// tns_data.read_datapresent_flag(&mut bitstream_reader);
-    ///
-    ///  ```
     pub fn read_datapresent_flag(&mut self, bs: &mut Bitstream) {
         self.is_data_present = bs.read_bit() != 0;
     }
@@ -286,27 +257,6 @@ impl TnsData {
     /// - `ics_info`: Individual channel stream info with valid internal data
     ///
     ///  Returns type of AacDecoderError
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::{
-    ///     tns::TnsData, channel_info::IcsInfo, error_codes::AacDecoderError
-    /// };
-    /// use aac::common::{bitstream::Bitstream, bitstream::Mode};
-    ///
-    /// // Precondition, should have a valid Bitstream and IcsInfo instance
-    /// // Refer respective components for instance creation, read/write methods
-    /// let buffer = vec![0; 8];
-    /// let mut bitstream_reader = Bitstream::new(buffer.len(), Mode::Reader);
-    /// bitstream_reader.init(&buffer, 40);
-    ///
-    /// let ics_info = IcsInfo::new();
-    ///
-    /// let mut tns_data = TnsData::default();
-    /// let error_status: AacDecoderError = tns_data.read(&mut bitstream_reader, &ics_info);
-    ///
-    ///  ```
     pub fn read(
         &mut self,
         bs: &mut Bitstream,
@@ -403,26 +353,6 @@ impl TnsData {
     ///
     /// - `ics_info`: Individual channel stream info with valid internal data
     /// - `spectral_coefficient`: Spectrum
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::{tns::TnsData, channel_info::IcsInfo};
-    /// use aac::common::flags::{ACFlags, self};
-    ///
-    /// // Precondition, should have a valid IcsInfo instance
-    /// // Refer IcsInfo component for instance creation, get methods
-    /// let ics_info = IcsInfo::new();
-    ///
-    /// let mut spectrum = vec![0.0_f32; 512];
-    /// let samplingrate_index: usize = 4;
-    /// let ac_flags = ACFlags::ER | ACFlags::ELD;
-    ///
-    /// let mut tns_data = TnsData::new(samplingrate_index, ac_flags);
-    ///
-    /// tns_data.apply(&ics_info, spectrum.as_mut_slice());
-    ///
-    ///  ```
     pub fn apply(&self, ics_info: &IcsInfo, spectral_coefficient: &mut [f32]) {
         if self.is_active {
             let mut coeff: [f32; TNS_MAXIMUM_ORDER] = Default::default();

@@ -143,11 +143,6 @@ impl JointStereoData {
         &mut self.ms_used
     }
 
-    /// Returns ms_mask_present
-    pub fn ms_mask_present(&self) -> u8 {
-        self.ms_mask_present
-    }
-
     /// Reads joint stereo data from given bitstream.
     ///
     /// # Parameters

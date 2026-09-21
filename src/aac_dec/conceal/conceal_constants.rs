@@ -102,9 +102,6 @@ pub const DFLT_FADEIN_FRAMES: i32 = 5;
 pub const DFLT_MUTE_RELEASE_FRAMES: i32 = 0;
 
 // For parameter conversion.
-pub const PARAMETER_BITS: i16 = 8;
-pub const MAX_QUANT_FACTOR: i16 = (1 << PARAMETER_BITS) - 1;
-pub const MIN_ATTENUATION_FACTOR_025_FL: f32 = 0.971627951577106174;
 // pub const MIN_ATTENUATION_FACTOR_050_FL: f32 = 0.944060876285923380;
 
 pub const MAX_NUM_FADE_FACTORS: usize = 32;
@@ -175,15 +172,6 @@ pub enum TDfadingType {
     FromSpectralMute,
     /// Fades time domain.
     FadeTimeDomain,
-}
-
-/// Concealment expand types.
-#[repr(C)]
-#[derive(Debug, PartialEq)]
-pub enum ConcealmentExpandType {
-    NoExpand,
-    Expand,
-    _Compress,
 }
 
 /// Fading directions

@@ -107,8 +107,6 @@ pub struct OutputInfo {
     /// The number of decoder output audio channels.
     pub num_channels: u8,
 
-    /// The number of samples the output is additionally delayed by the decoder.
-    pub output_delay: u32,
 
     /// Audio channel type of each output audio channel.
     pub channel_type: [AudioChannelType; 8],
