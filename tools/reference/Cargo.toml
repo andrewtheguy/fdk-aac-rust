@@ -1,6 +1,7 @@
 # The decoder checked against Fraunhofer's own C codec. Not part of the `aac` crate:
-# it links FDK AAC 2.0.3 through the sibling `fdk-aac-prebuilt` checkout, which needs
-# an archive of its own (`FDK_AAC_PREBUILT_DIR=../fdk-aac-prebuilt/dist/<target>`).
+# it links FDK AAC 2.0.3 through `fdk-aac-prebuilt`, pinned below to a commit on GitHub,
+# which needs an archive of its own (`FDK_AAC_PREBUILT_DIR=<a prefix you built>/dist/<target>`
+# unless the machine can reach the private archive releases through `gh`).
 #
 #     cargo run --release --manifest-path tools/reference/Cargo.toml -- help
 [package]
@@ -11,7 +12,8 @@ publish = false
 
 [dependencies]
 aac = { path = "../.." }
-fdk-aac = { package = "fdk-aac-prebuilt", path = "../../../fdk-aac-prebuilt/crates/fdk-aac-prebuilt" }
-sys = { package = "fdk-aac-prebuilt-sys", path = "../../../fdk-aac-prebuilt/crates/fdk-aac-prebuilt-sys" }
+# v2.0.3-20260921052032-4cad928
+fdk-aac = { package = "fdk-aac-prebuilt", git = "https://github.com/andrewtheguy/fdk-aac-prebuilt.git", rev = "4cad928cce0b2078a852f69b690982c5c4b901f5" }
+sys = { package = "fdk-aac-prebuilt-sys", git = "https://github.com/andrewtheguy/fdk-aac-prebuilt.git", rev = "4cad928cce0b2078a852f69b690982c5c4b901f5" }
 
 [workspace]
