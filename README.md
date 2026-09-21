@@ -75,10 +75,14 @@ stream to a 16-bit WAV; a `.rawpkts` file is a little-endian `i32` length and th
 AudioSpecificConfig, then a length and an access unit, repeated.
 
 `tools/reference` checks the decoder against Fraunhofer's C codec. It links FDK AAC
-2.0.3 through a sibling `fdk-aac-prebuilt` checkout, so it is not part of the crate:
+2.0.3 through [`fdk-aac-prebuilt`](https://github.com/andrewtheguy/fdk-aac-prebuilt),
+pinned to a commit in `tools/reference/Cargo.toml`, so it is not part of the crate. The
+archives themselves are not public: either the machine can reach their releases through
+`gh`, or point `FDK_AAC_PREBUILT_DIR` at a prefix built with that repository's
+`./build.sh`:
 
 ```sh
-export FDK_AAC_PREBUILT_DIR=$PWD/../fdk-aac-prebuilt/dist/linux-x86_64
+export FDK_AAC_PREBUILT_DIR=/path/to/fdk-aac-prebuilt/dist/linux-x86_64
 alias eld-reference='cargo run --release --manifest-path tools/reference/Cargo.toml --'
 
 # any audio, through the C encoder, as AAC-ELD without SBR (128 kbit/s, 480-sample frames)
