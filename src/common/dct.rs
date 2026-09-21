@@ -91,19 +91,10 @@ Am Wolfsmantel 33
 www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
-//! DCT implementations of DCT IV, DST IV and DCT II
+//! DCT IV
 //!
-//! Calculate standard DCTs. Implementations are based on a single,
-//! standard complex FFT-kernel. These are specifically helpful in cases where
-//! optimized FFT libraries are already available. The FFT used
-//! in these implementation is the FFT of the `common` crate.
-//
-//! Supported lengths are:
-//! * DCT IV: 8, 10, 16, 24, 32, 40, 48, 64, 96, 120, 128, 160, 192, 240, 256, 384, 480, 512, 768,
-//!   960, 1024
-//! * DST IV: 8, 10, 16, 24, 32, 40, 48, 64, 96, 120, 128, 160, 192, 240, 256, 384, 480, 512, 768,
-//!   960, 1024
-//! * DCT II: 8, 12, 16, 20, 24, 32, 40, 48, 64, 96, 120, 128
+//! The transform is calculated by the complex FFT of this crate, with some pre- and
+//! post-twiddling. Supported lengths are 480 and 512.
 
 use crate::common::fft::{fft, MAX_FFT_LENGTH};
 use crate::common::tables::sine_tables;
@@ -123,123 +114,91 @@ pub fn dctiv(data: &mut [f32]) {
     let dct_len = data.len();
     let fft_len = dct_len / 2;
 
-    let mut accu1: Complex<f32>;
-    let mut accu2: Complex<f32>;
-
     // get tables
     let twiddle =
         window_tables::get_table(dct_len as u16).unwrap();
 
-    // pre-twiddling
+    // pre-twiddling, straight into the buffer the FFT works on
+    let mut spectrum = [Complex::<f32>::default(); MAX_FFT_LENGTH];
+    let spectrum = &mut spectrum[..fft_len];
     {
-        let (im_part, re_part) = data.split_at_mut(fft_len);
+        let (im_part, re_part) = data.split_at(fft_len);
+        let (lower, upper) = spectrum.split_at_mut(fft_len / 2);
 
-        let im_chunk = im_part.chunks_exact_mut(2);
-        let re_chunk = re_part.rchunks_exact_mut(2);
+        let im_chunk = im_part.chunks_exact(2);
+        let re_chunk = re_part.rchunks_exact(2);
         let twi_chunk = twiddle.chunks_exact(2);
 
-        for (real, imag, twi) in izip!(re_chunk, im_chunk, twi_chunk) {
-            accu1 = Complex {
+        for (real, imag, twi, lo, hi) in
+            izip!(re_chunk, im_chunk, twi_chunk, lower.iter_mut(), upper.iter_mut().rev())
+        {
+            let accu1 = Complex {
                 re: real[1],
                 im: imag[0],
             } * twi[0];
-            accu2 = Complex {
+            let accu2 = Complex {
                 re: real[0],
                 im: imag[1],
             } * twi[1];
 
-            (imag[0], imag[1]) = (accu1.im, accu1.re);
-            (real[0], real[1]) = (accu2.im, -accu2.re);
+            *lo = Complex {
+                re: accu1.im,
+                im: accu1.re,
+            };
+            *hi = Complex {
+                re: accu2.im,
+                im: -accu2.re,
+            };
         }
     }
 
-    if (fft_len & 1) == 1 {
-        accu1 = Complex {
-            re: data[fft_len],
-            im: data[fft_len - 1],
-        } * twiddle[fft_len - 1];
-
-        data[fft_len] = accu1.re;
-        data[fft_len - 1] = accu1.im;
-    }
-
     // fft
-    let mut complex_data = [Complex::<f32>::default(); MAX_FFT_LENGTH];
-    let complex_data = &mut complex_data[..fft_len];
-    for (complex, pair) in izip!(complex_data.iter_mut(), data.chunks_exact(2)) {
-        *complex = Complex { re: pair[0], im: pair[1] };
-    }
-    fft(complex_data);
-    for (pair, complex) in izip!(data.chunks_exact_mut(2), complex_data.iter()) {
-        (pair[0], pair[1]) = (complex.re, complex.im);
-    }
+    fft(spectrum);
 
-    // post-twiddling
+    // post-twiddling, back into the caller's buffer
     let mut sin_step = 0;
     let sin_twiddle = sine_tables::get_table(dct_len as u16, &mut sin_step).unwrap();
 
-    accu1 = Complex {
-        re: data[dct_len - 2],
-        im: data[dct_len - 2 + 1],
-    };
+    let mut sin_twi = sin_twiddle[sin_step];
+    let mut accu1 = spectrum[fft_len - 1];
+    let mut accu2 = accu1 * sin_twi;
 
-    data[dct_len - 2 + 1] = -data[1];
-    // data[0] = data[0]
-
-    let data_upper_boundary = ((fft_len - 1) >> 1) * 2;
+    data[0] = spectrum[0].re;
+    data[1] = accu2.re;
+    data[dct_len - 2] = accu2.im;
+    data[dct_len - 1] = -spectrum[0].im;
 
     {
-        let mut sin_twi = sin_twiddle[sin_step];
-        accu2 = accu1 * sin_twi;
-        data[1] = accu2.re;
-        data[dct_len - 2] = accu2.im;
-
-        let l_data_last = data[fft_len - 1];
-        let r_data_last = data[fft_len];
-
         let (left, right) = data.split_at_mut(fft_len);
-        let le_chunk = left.chunks_exact_mut(2).skip(1);
-        let ri_chunk = right.rchunks_exact_mut(2).skip(1);
+        let (lower, upper) = spectrum.split_at(fft_len / 2);
+        let le_chunk = left.chunks_exact_mut(2);
+        let ri_chunk = right.rchunks_exact_mut(2);
 
-        let mut k = 1;
-        for (l_data, r_data) in izip!(le_chunk, ri_chunk).take(data_upper_boundary >> 1) {
+        for (k, (l_data, r_data, lo, hi)) in
+            izip!(le_chunk, ri_chunk, lower, upper.iter().rev()).enumerate().skip(1)
+        {
             accu2 = Complex {
-                re: l_data[1],
-                im: l_data[0],
+                re: lo.im,
+                im: lo.re,
             } * sin_twi;
 
-            accu1.re = r_data[0];
-            accu1.im = r_data[1];
+            accu1 = *hi;
 
             r_data[1] = -accu2.re;
             l_data[0] = accu2.im;
 
-            k += 1;
-            sin_twi = sin_twiddle[k * sin_step];
+            sin_twi = sin_twiddle[(k + 1) * sin_step];
 
             accu2 = accu1 * sin_twi;
             l_data[1] = accu2.re;
             r_data[0] = accu2.im;
         }
-
-        if (fft_len & 1) == 1 {
-            // Handle odd fft length.
-            accu2 = Complex {
-                re: r_data_last,
-                im: l_data_last,
-            } * sin_twi;
-
-            data[fft_len] = -accu2.re;
-            data[fft_len - 1] = accu2.im;
-        }
     }
 
-    if (fft_len & 1) == 0 {
-        accu1 *= consts::FRAC_1_SQRT_2;
+    accu1 *= consts::FRAC_1_SQRT_2;
 
-        data[dct_len - 4 - (data_upper_boundary - 2)] = accu1.re + accu1.im;
-        data[data_upper_boundary - 2 + 2 + 1] = accu1.re - accu1.im;
-    }
+    data[fft_len] = accu1.re + accu1.im;
+    data[fft_len - 1] = accu1.re - accu1.im;
 }
 
 #[cfg(test)]
