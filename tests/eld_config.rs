@@ -60,3 +60,10 @@ fn everything_else_is_refused() {
         assert_eq!(config(&eld(3, 2, 0b10000 | flag)), Err(AacDecoderError::UnsupportedFormat));
     }
 }
+
+/// A decoder can be handed to another thread.
+#[test]
+fn the_decoder_is_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<AacDecoderInstance>();
+}

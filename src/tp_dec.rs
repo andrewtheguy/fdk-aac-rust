@@ -92,187 +92,76 @@ www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! MPEG transport format decoder
+//!
+//! Raw access units are the one transport: the AudioSpecificConfig arrives out of
+//! band, and every access unit is handed over whole.
 
 // Modules
 pub mod asc;
-pub mod callbacks;
 pub mod constants;
 pub mod error_codes;
-pub mod info;
 
 // Re-exports
 pub use {
     asc::AudioSpecificConfig,
-    callbacks::TpDecCallBacks,
     constants::{MAX_CONF_SIZE, TRANSPORTDEC_INBUF_SIZE},
     error_codes::TpDecoderError,
 };
 
 // Imports
 use crate::common::bitstream::{Bitstream, Mode};
-use info::TpDecInfo;
 
 // Enums
 /// Reconfiguration states
-#[repr(u8)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum ReconfigState {
-    /// No config mode set at all.
-    None = 0x00,
-    /// Config mode signalizes the callback to work in config change detection mode.
-    DetCfgChange = 0x01,
-    /// Config mode signalizes the callback to work in memory allocation mode.
-    AllocMem = 0x02,
-}
-
-impl From<ReconfigState> for u8 {
-    fn from(state: ReconfigState) -> Self {
-        match state {
-            ReconfigState::None => 0x00,
-            ReconfigState::DetCfgChange => 0x01,
-            ReconfigState::AllocMem => 0x02,
-        }
-    }
-}
-
-impl TryFrom<u8> for ReconfigState {
-    type Error = &'static str;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x00 => Ok(ReconfigState::None),
-            0x01 => Ok(ReconfigState::DetCfgChange),
-            0x02 => Ok(ReconfigState::AllocMem),
-            _ => Err("invalid u8 value to convert to ReconfigState."),
-        }
-    }
+    /// The decoder is asked whether the config differs from the one it runs with.
+    DetCfgChange,
+    /// The decoder is asked to allocate for the config and to take it over.
+    AllocMem,
 }
 
 impl ReconfigState {
-    fn all() -> [ReconfigState; 2] {
+    /// The order a config is handed to the decoder in.
+    pub fn all() -> [ReconfigState; 2] {
         [ReconfigState::DetCfgChange, ReconfigState::AllocMem]
     }
 }
 
-// Structs
-#[derive(Default, Debug)]
-#[repr(C)]
-/// Transport Decoder Data structure.
-pub struct TpDecData {
-    /// Audio specific config from the last config found.
-    asc: AudioSpecificConfig,
-    /// Transport decoder frame info.
-    info: TpDecInfo,
-    /// Indicates valid config and successful decoder initialisation.
-    is_config_found: bool,
-}
-
-impl TpDecData {
-    /// Returns new instance of `TpDecData`.
-    pub fn new() -> TpDecData {
-        TpDecData::default()
-    }
-
-
-    /// Initialises `TpDecData`.
-    pub(super) fn init(&mut self) {
-        self.info.init();
-        self.asc.init();
-    }
-
-    /// Deinitialises `TpDecData`.
-    pub fn deinit(&mut self) {
-        self.asc.reset();
-        self.info.reset();
-        self.is_config_found = false;
-    }
-
-    /// Notes the access unit that was filled into the buffer.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid internal data.
-    ///
-    /// # Return
-    ///
-    /// - `TpDecoderError`.
-    fn read_header(&mut self, bs: &mut Bitstream) -> Result<(), TpDecoderError> {
-        let mut err = Ok(());
-
-        if bs.valid_bits() <= 0 {
-            err = Err(TpDecoderError::NotEnoughBits);
-        } else if !self.is_config_found {
-            // Decoder needs to be configured with out of band config.
-            err = Err(TpDecoderError::UnknownError);
-        } else {
-            // One Access Unit was filled into buffer, so get the length out of the
-            // buffer.
-            self.info.set_au_length(bs.valid_bits().try_into().unwrap());
-            self.info.set_access_unit_anchor(bs.valid_bits());
-        }
-
-        if err.is_err() {
-            self.info.reset();
-        }
-
-        err
-    }
-
-    /// Resets the `TpDecData`.
-    fn reset(&mut self) {
-        self.info.reset();
-    }
-}
-
-#[repr(C)]
 #[derive(Debug)]
 /// Transport decoder structure.
 pub struct TransportDec {
     /// Bitstream.
     pub bs: Bitstream,
-    /// Transport decoder callbacks.
-    cb: TpDecCallBacks,
-    /// Transport Decoder Data.
-    pub data: TpDecData,
+    /// Indicates valid config and successful decoder initialisation.
+    is_config_found: bool,
 }
 
 impl Default for TransportDec {
-    /// Returns default instance of `TransportDec`.
     fn default() -> Self {
-        Self {
-            bs: Default::default(),
-            cb: Default::default(),
-            data: Default::default(),
-        }
+        Self::new()
     }
 }
 
 impl TransportDec {
     /// Returns new instance of `TransportDec`.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            bs: Bitstream::new(TRANSPORTDEC_INBUF_SIZE, Mode::Reader),
+            is_config_found: false,
+        }
     }
 
-
-    /// Initialises `TransportDec`.
-    pub fn init(&mut self) {
-        self.bs = Bitstream::new(TRANSPORTDEC_INBUF_SIZE, Mode::Reader);
-        self.data.init();
-    }
-
-    /// Configures TransportDec via a binary coded AudioSpecificConfig or StreamMuxConfig.
+    /// Parses a binary coded AudioSpecificConfig.
     ///
     /// # Parameters
     ///
-    /// - `conf`: u8 buffer of the binary coded config (ASC or SMC).
+    /// - `conf`: u8 buffer of the binary coded config.
     ///
     /// # Return
     ///
-    ///   - `TpDecoderError`.
-    pub fn out_of_band_config(&mut self, conf: &[u8]) -> Result<(), TpDecoderError> {
-        let mut err = Ok(());
-        let mut config_found = false;
-
+    ///   - `AudioSpecificConfig`, or the `TpDecoderError` that refused it.
+    pub fn parse_config(&self, conf: &[u8]) -> Result<AudioSpecificConfig, TpDecoderError> {
         if conf.len() > MAX_CONF_SIZE {
             return Err(TpDecoderError::UnsupportedFormat);
         }
@@ -280,48 +169,15 @@ impl TransportDec {
         let mut bs = Bitstream::new(MAX_CONF_SIZE, Mode::Reader);
         bs.init(conf, 8 * conf.len());
 
-        for config_mode in ReconfigState::all() {
-            if config_mode == ReconfigState::AllocMem {
-                let num_bits = (conf.len() * 8) as isize - bs.valid_bits();
-                bs.push(-num_bits);
-            }
-            self.cb.set_config_mode(config_mode);
+        let mut asc = AudioSpecificConfig::new();
+        asc.parse(&mut bs)?;
 
-            // Config transport decoder.
-            let mut dummy_asc = AudioSpecificConfig::new();
-            dummy_asc.init();
+        Ok(asc)
+    }
 
-            err = dummy_asc.parse(&mut bs);
-
-            if err.is_ok() {
-                if self.cb.update_config_callback(&dummy_asc).is_err() {
-                    err = Err(TpDecoderError::ParseError);
-                    break;
-                }
-                self.data.asc = dummy_asc;
-                config_found = true;
-            }
-
-            if err.is_ok()
-                && (config_mode == ReconfigState::DetCfgChange)
-                && self.cb.is_config_changed()
-                && self.cb.free_mem_callback().is_err()
-            {
-                err = Err(TpDecoderError::ParseError);
-            }
-
-            // If an error is detected terminate config parsing to avoid that an invalid
-            // config is accepted in the second pass.
-            if err.is_err() {
-                break;
-            }
-        }
-
-        if err.is_ok() && config_found {
-            self.data.is_config_found = true;
-        }
-
-        err
+    /// Notes that the decoder took a config over, which is what lets access units in.
+    pub fn set_config_found(&mut self) {
+        self.is_config_found = true;
     }
 
     /// Fills the bitstream buffer with one access unit.
@@ -349,11 +205,6 @@ impl TransportDec {
         Ok(valid_bytes)
     }
 
-    /// Returns reference to a callback.
-    pub fn callback(&mut self) -> &mut TpDecCallBacks {
-        &mut self.cb
-    }
-
     /// Takes the access unit in the buffer as the next one to decode.
     ///
     /// # Return
@@ -361,43 +212,23 @@ impl TransportDec {
     ///   - `TpDecoderError`.
     pub fn read_access_unit(&mut self) -> Result<(), TpDecoderError> {
         if self.bs.valid_bits() <= 0 {
-            self.data.reset();
             return Err(TpDecoderError::NotEnoughBits);
         }
 
-        let mut err = self.data.read_header(&mut self.bs);
-        if err == Err(TpDecoderError::NotEnoughBits) {
-            err = Err(TpDecoderError::SyncError);
-        }
-        if err.is_ok() {
-            self.data.reset();
+        if !self.is_config_found {
+            // Decoder needs to be configured with out of band config.
+            return Err(TpDecoderError::UnknownError);
         }
 
-        err
+        Ok(())
     }
 
-    /// Returns the remaining amount of bits of the current access unit. The result can be below
-    /// zero, meaning that too many bits have been read.
+    /// Returns the number of bits left in the access unit, which is the whole buffer.
     pub fn remaining_au_bits(&mut self) -> isize {
-        let valid_bits = self.bs.valid_bits();
-
-        if self.data.info.access_unit_anchor() > 0
-            && self.data.info.au_length() > 0
-            && valid_bits >= 0
-        {
-            return isize::try_from(self.data.info.au_length()).unwrap()
-                - (self.data.info.access_unit_anchor() - valid_bits);
-        }
-
-        valid_bits
+        self.bs.valid_bits()
     }
 
-    /// Returns the total amount of bits of the current access unit.
-    pub fn total_au_bits(&self) -> i32 {
-        self.data.info.au_length()
-    }
-
-    /// Returns a mutable reference to `Bitstream`.
+    /// Returns mutable reference of the `Bitstream` data.
     pub fn bs_mut(&mut self) -> &mut Bitstream {
         &mut self.bs
     }
@@ -405,10 +236,10 @@ impl TransportDec {
     /// Discards the buffered access unit.
     pub fn reset(&mut self) {
         self.bs.reset();
-        self.data.reset();
     }
 
-    /// Returns the number of trailing bits that need to be consumed to finalize the AU parsing.
+    /// Returns the number of trailing bits that need to be consumed to finalize the AU parsing:
+    /// those up to the next byte boundary.
     ///
     /// # Parameters
     ///
@@ -418,13 +249,6 @@ impl TransportDec {
     ///
     /// - `isize`: Number of trailing bits in AU.
     pub fn trailing_bits(&mut self, au_start_anchor: isize) -> isize {
-        let valid_bits = self.bs.valid_bits();
-
-        if self.total_au_bits() > 0 {
-            self.remaining_au_bits()
-        } else {
-            (valid_bits - au_start_anchor) & 7
-        }
+        (self.bs.valid_bits() - au_start_anchor) & 7
     }
-
 }

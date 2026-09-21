@@ -98,7 +98,7 @@ use crate::{
         config::Config,
         error_codes::AacDecoderError,
         interleaver,
-        output_info::{OutputInfo, StreamInfo},
+        output_info::OutputInfo,
         params::Params,
         process::{InitState, Process},
     },
@@ -107,9 +107,8 @@ use crate::{
         channel_order::ChannelOrder,
         flags::AACDecFlags,
     },
-    tp_dec::TransportDec,
+    tp_dec::{AudioSpecificConfig, ReconfigState, TransportDec},
 };
-use itertools::izip;
 
 /// AAC decoder.
 #[repr(C)]
@@ -150,19 +149,71 @@ impl AacDecoder {
         aac_dec
     }
 
-    /// De-initializes the internal memory and sub-components.
-    pub(super) fn close(&mut self) {
-        if !self.work_buffer_output.is_empty() {
-            self.work_buffer_output.clear();
-            self.work_buffer_output.shrink_to_fit();
-        }
+    /// Frees what was allocated for the config the decoder runs with.
+    pub(super) fn free_memory(&mut self) {
+        self.aac_core.deinit();
+        self.config = Config::default();
 
         if !self.work_buffer_core.is_empty() {
             self.work_buffer_core.clear();
             self.work_buffer_core.shrink_to_fit();
         }
+    }
 
-        self.aac_core.deinit();
+    /// Hands a parsed config to the decoder.
+    ///
+    /// # Parameters
+    ///
+    /// - `asc`: Audio specific config.
+    /// - `config_mode`: Whether to detect a config change or to take the config over.
+    /// - `is_config_changed`: Whether the config differs from the one the decoder runs with;
+    ///   written when detecting, read when taking over.
+    ///
+    /// # Return
+    ///
+    /// - `Result<(), AacDecoderError>`
+    pub(super) fn update_config(
+        &mut self,
+        asc: &AudioSpecificConfig,
+        config_mode: ReconfigState,
+        is_config_changed: &mut bool,
+    ) -> Result<(), AacDecoderError> {
+        let mut decoder_config = Config::default();
+        if let Err(err) = decoder_config.init(asc) {
+            if config_mode == ReconfigState::AllocMem {
+                self.free_memory();
+            }
+            return Err(err);
+        }
+
+        // Detect config change.
+        if config_mode == ReconfigState::DetCfgChange {
+            *is_config_changed = decoder_config.is_config_change(&self.config);
+        }
+
+        // Initialize AAC core decoder, and update decoder config.
+        if let Err(err) = self
+            .aac_core
+            .init(&decoder_config, config_mode, *is_config_changed)
+        {
+            if config_mode == ReconfigState::AllocMem {
+                self.free_memory();
+            }
+            return Err(err);
+        }
+
+        if config_mode == ReconfigState::AllocMem {
+            if self.work_buffer_core.is_empty() {
+                let work_buffer_len = usize::from(decoder_config.num_channels)
+                    * usize::from(decoder_config.frame_length);
+                self.work_buffer_core = vec![0.0f32; work_buffer_len];
+            }
+
+            // Store new decoder config.
+            self.config = decoder_config;
+        }
+
+        Ok(())
     }
 
     /// Creates output information based on the current decoder state and the given return value.
@@ -302,53 +353,4 @@ impl AacDecoder {
         }
     }
 
-    /// Returns `StreamInfo` which gives information about the currently decoded audio data.
-    ///
-    /// # Parameters
-    ///
-    /// - `tp_dec`: `TransportDec` instance with valid data.
-    /// - `bs_anchor`: Bitstream anchor value at start of AAC decoding.
-    ///
-    /// # Return
-    ///
-    /// - `Option<StreamInfo>`
-    pub(super) fn stream_info(
-        &mut self,
-        tp_dec: &mut TransportDec,
-        bs_anchor: isize,
-    ) -> Option<StreamInfo> {
-        // Update `StreamInfo`.
-        if self.aac_core.init_state() == InitState::Complete {
-            // Create `StreamInfo` with default values.
-            let mut si = StreamInfo::new();
-
-            si.aot = self.config.aot;
-            si.ext_aot = self.config.aot;
-            si.channel_config = i32::from(self.config.channel_config);
-            si.ext_sampling_rate = self.config.sampling_frequency;
-            si.sample_rate = self.config.sampling_frequency;
-            si.samples_per_frame = self.config.samples_per_frame;
-            si.flags = self.config.ac_flags;
-
-            for (si_el, ele_config) in izip!(
-                si.bs_element_list.iter_mut(),
-                self.config.element_config.iter(),
-            )
-            .take(usize::from(self.config.num_elements))
-            {
-                *si_el = ele_config.element_type;
-            }
-            si.num_elements = self.config.num_elements;
-
-            si.num_channels = self.config.num_channels;
-
-            si.ch_order = self.map_descr.ch_map_order;
-            si.num_consumed_bytes =
-                u32::try_from(bs_anchor - tp_dec.bs_mut().valid_bits()).unwrap() / 8;
-
-            Some(si)
-        } else {
-            None
-        }
-    }
 }

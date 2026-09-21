@@ -89,7 +89,7 @@ fn decode(stream: &[u8], damage: bool) -> String {
                 info
             }
         };
-        let out = info.output_info;
+        let out = info;
         hash.bytes(&out.frame_size.to_le_bytes());
         hash.bytes(&out.num_channels.to_le_bytes());
         hash.bytes(&out.sampling_rate.to_le_bytes());

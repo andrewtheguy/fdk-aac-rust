@@ -92,12 +92,9 @@ www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! AAC decoder output information
-use super::ACFlags;
-use crate::common::{
-    aot::AudioObjectType, audio_channel_type::AudioChannelType, bs_element_id::ChannelElementId,
-    channel_order::ChannelOrder,
-};
+use crate::common::audio_channel_type::AudioChannelType;
 
+/// Information about the decoded output.
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct OutputInfo {
@@ -117,144 +114,12 @@ pub struct OutputInfo {
     pub channel_type: [AudioChannelType; 8],
 
     /// Audio channel index for each output audio channel.
-    /// See ISO/IEC 13818-7:2005(E), 8.5.3.2 Explicit channel mapping using a
-    /// program_config_element().
     pub channel_indices: [u8; 8],
-
 }
 
 impl OutputInfo {
-    /// Creates a new instance of `OutputInfo`, initialized with default values.
+    /// Creates a new `OutputInfo` instance.
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-/// This structure gives information about the currently decoded audio data.
-/// All fields are read-only.
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub struct StreamInfo {
-    /// The number of bitstream elements.
-    pub num_elements: u8,
-
-    /// Bitstream element list.
-    pub bs_element_list: [ChannelElementId; 10],
-
-    /// Audio channel order (MPEG, WAV, CICP) provided at the decoder output.
-    /// In case of MPEG-H, the CICP order is used always.
-    pub ch_order: ChannelOrder,
-
-    /// Sampling rate in Hz without SBR (from configuration info) divided by a (ELD) downscale
-    /// factor if present.
-    pub sample_rate: u32,
-
-    /// Audio Object Type (from ASC): is set to the appropriate value for MPEG bitstreams (e.g. 2
-    /// for AAC-LC).
-    pub aot: AudioObjectType,
-
-    /// Channel configuration (0: PCE-defined, 1: mono, 2: stereo, ...).
-    pub channel_config: i32,
-
-    /// Samples per frame for the AAC core (from ASC) divided by a (ELD) downscale factor if
-    /// present. Typically this is (with a downscale factor of 1):
-    /// 1024 or 960 for AAC-LC
-    /// 512 or 480 for AAC-LD and AAC-ELD
-    pub samples_per_frame: u16,
-
-    /// The number of audio channels after AAC core processing (before PS or MPS processing).
-    /// CAUTION: This is not necessarily the final number of output channels!
-    pub num_channels: u8,
-
-    /// Extension Audio Object Type (from ASC).
-    pub ext_aot: AudioObjectType,
-
-    /// Extension sampling rate in Hz (from ASC) divided by a (ELD) downscale factor if present.
-    pub ext_sampling_rate: u32,
-
-    /// Copy of internal flags. Only to be written by the decoder, and only to be read externally.
-    pub flags: ACFlags,
-
-    /// This is the number of total bytes that have passed through the decoder
-    /// within the present function call.
-    pub num_consumed_bytes: u32,
-}
-
-impl Default for StreamInfo {
-    fn default() -> Self {
-        Self {
-            num_elements: 0,
-            bs_element_list: Default::default(),
-            ch_order: Default::default(),
-            sample_rate: 0,
-            aot: AudioObjectType::AotNone,
-            channel_config: -1,
-            samples_per_frame: 0,
-            num_channels: 0,
-            ext_aot: AudioObjectType::AotNone,
-            ext_sampling_rate: 0,
-            flags: ACFlags::empty(),
-            num_consumed_bytes: 0,
-        }
-    }
-}
-
-impl StreamInfo {
-    /// Returns new instance of `StreamInfo`.
-    pub fn new() -> StreamInfo {
-        StreamInfo::default()
-    }
-}
-
-/// Gives information collected from the bitstream.
-#[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
-pub struct BitstreamInfo {
-    /// Gives information about the currently decoded audio data.
-    pub stream_info: Option<StreamInfo>,
-}
-
-impl BitstreamInfo {
-    /// Creates a new instance of `BitstreamInfo`, initialized with default values.
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Gets the stream information, if available.
-    pub fn stream_info(&self) -> Option<StreamInfo> {
-        self.stream_info
-    }
-
-    /// Sets the stream information.
-    pub fn set_stream_info(&mut self, si: Option<StreamInfo>) {
-        match si {
-            Some(s) => {
-                self.stream_info = Some(s);
-            }
-            None => {
-                self.stream_info = None;
-            }
-        }
-    }
-
-}
-
-/// Describes the information of the current AAC frame.
-#[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
-pub struct DecoderInfo {
-    /// Describes the audio output information of the current AAC frame.
-    pub output_info: OutputInfo,
-    /// Describes the bitstream information of the current AAC frame.
-    pub bs_info: BitstreamInfo,
-}
-
-impl DecoderInfo {
-    /// Creates a new instance of `DecoderInfo`, initialized with default values.
-    pub fn new() -> Self {
-        Self {
-            output_info: OutputInfo::new(),
-            bs_info: BitstreamInfo::new(),
-        }
     }
 }
