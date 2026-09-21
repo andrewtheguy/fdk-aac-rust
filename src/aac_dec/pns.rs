@@ -236,14 +236,12 @@ impl PnsData {
                     .take(ics_info.max_sf_bands())
                     {
                         if *is_pns_used {
-                            let random_state;
-
-                            if channel > 0 && *is_correlated {
-                                random_state = random_seed;
+                            let random_state = if channel > 0 && *is_correlated {
+                                random_seed
                             } else {
                                 *random_seed = pns_interchannel_data.current_seed;
-                                random_state = &mut pns_interchannel_data.current_seed;
-                            }
+                                &mut pns_interchannel_data.current_seed
+                            };
 
                             let spec_start = usize::from(*band_offset_curr);
                             let spec_end = usize::from(*band_offset_next);

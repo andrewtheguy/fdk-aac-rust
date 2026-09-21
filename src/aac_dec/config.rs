@@ -108,8 +108,6 @@ use itertools::izip;
 pub(super) struct ElementConfig {
     /// Element type.
     pub(super) element_type: ChannelElementId,
-    /// Channel flags for the element.
-    pub(super) el_flags: ChannelFlags,
 }
 
 /// AAC decoder configuration, derived from the parsed ASC.

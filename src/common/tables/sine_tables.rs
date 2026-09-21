@@ -140,15 +140,6 @@ pub fn get_table(length: u16, sin_step: &mut usize) -> Option<&'static [Complex<
 }
 
 #[rustfmt::skip]
-pub static SINE_TABLE_32: [Complex<f32>; 17] = [
-
-  Complex { re: 1.000000000, im: 0.000000000 }, Complex { re: 0.998795456, im: 0.049067674 }, Complex { re: 0.995184727, im: 0.098017140 }, Complex { re: 0.989176510, im: 0.146730474 },
-  Complex { re: 0.980785280, im: 0.195090322 }, Complex { re: 0.970031253, im: 0.242980180 }, Complex { re: 0.956940336, im: 0.290284677 }, Complex { re: 0.941544065, im: 0.336889853 },
-  Complex { re: 0.923879533, im: 0.382683432 }, Complex { re: 0.903989293, im: 0.427555093 }, Complex { re: 0.881921264, im: 0.471396737 }, Complex { re: 0.857728610, im: 0.514102744 },
-  Complex { re: 0.831469612, im: 0.555570233 }, Complex { re: 0.803207531, im: 0.595699304 }, Complex { re: 0.773010453, im: 0.634393284 }, Complex { re: 0.740951125, im: 0.671558955 },
-  Complex { re: 0.707106781, im: 0.707106781 },
-];
-#[rustfmt::skip]
 pub static SINE_TABLE_80: [Complex<f32>; 41] = [
 
   Complex { re: 1.000000000, im: 0.000000000 }, Complex { re: 0.999807240, im: 0.019633692 }, Complex { re: 0.999229036, im: 0.039259816 }, Complex { re: 0.998265610, im: 0.058870804 },

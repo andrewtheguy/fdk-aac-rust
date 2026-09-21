@@ -170,18 +170,6 @@ impl IcsInfo {
                 _ => BlockType::Stop,
             };
             self.window_shape = (bs.read_bit() as u8).into();
-
-            if ac_flags.contains(ACFlags::LD) && self.window_shape != WindowShape::Sine {
-                self.window_shape = WindowShape::LowOverlap;
-            }
-        }
-
-        // Sanity check
-        if ac_flags.intersects(ACFlags::ELD | ACFlags::LD)
-            && self.window_sequence != BlockType::Long
-        {
-            self.window_sequence = BlockType::Long;
-            return AacDecoderError::ParseError;
         }
 
         let error_status = self.read_max_sfb(bs, sampling_rate_info);
@@ -190,9 +178,8 @@ impl IcsInfo {
         }
 
         if self.is_long_block() {
-            if !ac_flags.intersects(ACFlags::ELD | ACFlags::SCALABLE)
-                && bs.read_bit() != 0
-            // If not ELD nor Scalable nor BSAC nor USAC syntax then ...
+            if !ac_flags.contains(ACFlags::ELD) && bs.read_bit() != 0
+            // If not ELD syntax then ...
             {
                 return AacDecoderError::UnsupportedPrediction;
             }
@@ -369,7 +356,7 @@ mod tests {
 
             assert!(ics_info.is_long_block());
             assert_eq!(ics_info.windows_per_frame(), 1);
-            assert_eq!(ics_info.window_shape(), WindowShape::KBD);
+            assert_eq!(ics_info.window_shape(), WindowShape::Kbd);
             assert_eq!(ics_info.window_sequence(), BlockType::Long);
             assert_eq!(ics_info.n_window_groups(), 1);
             assert_eq!(ics_info.window_group_length(0), 1);

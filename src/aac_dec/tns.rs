@@ -218,7 +218,7 @@ impl TnsData {
     pub fn init(&mut self, sr_index: usize, ac_flags: ACFlags) {
         self.reset();
 
-        if ac_flags.intersects(ACFlags::LD | ACFlags::ELD) {
+        if ac_flags.contains(ACFlags::ELD) {
             if ac_flags.contains(ACFlags::FRAME_LENGTH) {
                 self.tns_max_bands[0] = TNS_MAX_BANDS_TBL_480[sr_index];
                 self.tns_max_bands[1] = 0;

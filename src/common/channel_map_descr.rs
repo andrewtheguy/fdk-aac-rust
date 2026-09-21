@@ -230,8 +230,7 @@ impl ChannelMapInfo {
     fn ch_map_descr_is_valid_map(&self) -> bool {
         let mut result: bool = true;
 
-        if self.channel_map.is_some() {
-            let channel_map = self.channel_map.unwrap();
+        if let Some(channel_map) = self.channel_map {
             let num_channels: usize = channel_map.len();
 
             if num_channels < 32 {

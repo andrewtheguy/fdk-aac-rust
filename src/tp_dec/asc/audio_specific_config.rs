@@ -155,7 +155,7 @@ impl AudioSpecificConfig {
         if self.aot != AudioObjectType::AotErAacEld {
             return Err(TpDecoderError::UnsupportedFormat);
         }
-        self.ac_flags.insert(ACFlags::ER | ACFlags::ELD);
+        self.ac_flags.insert(ACFlags::ELD);
 
         self.sampling_frequency = get_sample_rate(bs, Some(&mut self.sampling_frequency_index), 4);
         if self.sampling_frequency == 0 {
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(asc.sampling_frequency_index(), 3);
         assert_eq!(asc.channel_config(), 2);
         assert_eq!(asc.samples_per_frame(), 480);
-        assert!(asc.ac_flags() == ACFlags::ER | ACFlags::ELD | ACFlags::FRAME_LENGTH);
+        assert!(asc.ac_flags() == ACFlags::ELD | ACFlags::FRAME_LENGTH);
     }
 
     #[test]

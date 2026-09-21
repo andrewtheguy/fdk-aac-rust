@@ -184,47 +184,42 @@ impl Process {
             decoder_config.sampling_frequency,
         )?;
 
-        if config_mode == ReconfigState::AllocMem {
-            if config_changed {
-                // Allocate all memory structures for each channel.
-                let mut ch = 0;
-                self.channel_elements =
-                    Vec::with_capacity(decoder_config.num_channel_elements.into());
+        if config_mode == ReconfigState::AllocMem && config_changed {
+            // Allocate all memory structures for each channel.
+            let mut ch = 0;
+            self.channel_elements =
+                Vec::with_capacity(decoder_config.num_channel_elements.into());
 
-                for el_cfg in decoder_config
-                    .element_config
-                    .iter()
-                    .take(decoder_config.num_elements.into())
-                {
-                    if el_cfg.element_type.is_channel_element() {
-                        self.channel_elements.push(ChannelElement::new());
-                        let current_ch_element = self.channel_elements.len() - 1;
+            for el_cfg in decoder_config
+                .element_config
+                .iter()
+                .take(decoder_config.num_elements.into())
+            {
+                if el_cfg.element_type.is_channel_element() {
+                    self.channel_elements.push(ChannelElement::new());
+                    let current_ch_element = self.channel_elements.len() - 1;
 
-                        self.channel_elements[current_ch_element].init(
-                            &sampling_rate_info,
-                            el_cfg.element_type,
-                            decoder_config.frame_length.into(),
-                            el_cfg.el_flags,
-                            decoder_config.ac_flags,
-                        );
+                    self.channel_elements[current_ch_element].init(
+                        &sampling_rate_info,
+                        el_cfg.element_type,
+                        decoder_config.frame_length.into(),
+                        decoder_config.ac_flags,
+                    );
 
-                        ch += self.channel_elements[current_ch_element].num_channels();
-                    }
+                    ch += self.channel_elements[current_ch_element].num_channels();
                 }
-                if ch != decoder_config.num_channels {
-                    return self.bail_from_init();
-                }
+            }
+            if ch != decoder_config.num_channels {
+                return self.bail_from_init();
+            }
 
-                self.common_channel_data.init(&sampling_rate_info);
+            self.common_channel_data.init(&sampling_rate_info);
 
-                self.conceal_data.init(decoder_config.num_channels.into());
+            self.conceal_data.init(decoder_config.num_channels.into());
 
-                self.num_core_channels = decoder_config.num_channels;
-                self.init_state = InitState::Startup;
-            } // config_changed
-
-            self.accept_flags(decoder_config);
-        } // config_mode == ReconfigState::AllocMem
+            self.num_core_channels = decoder_config.num_channels;
+            self.init_state = InitState::Startup;
+        }
 
         Ok(())
     }
@@ -545,22 +540,6 @@ impl Process {
     }
 
     // Internal helper functions
-
-    /// Take over flags from decoder config.
-    fn accept_flags(&mut self, decoder_config: &Config) {
-        let mut channel_element_count = 0;
-        for el_cfg in decoder_config
-            .element_config
-            .iter()
-            .take(decoder_config.num_elements.into())
-        {
-            if el_cfg.element_type.is_channel_element() {
-                self.channel_elements[channel_element_count].clear_flags();
-                self.channel_elements[channel_element_count].insert_flags(el_cfg.el_flags);
-                channel_element_count += 1;
-            }
-        }
-    }
 
     /// States whether all channel elements have been read.
     fn all_channel_elements_read(&self) -> bool {

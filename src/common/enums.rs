@@ -123,7 +123,7 @@ impl From<usize> for AudioChannel {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum WindowShape {
     Sine = 0,
-    KBD = 1,
+    Kbd = 1,
     LowOverlap = 2,
 }
 
@@ -139,7 +139,7 @@ impl From<u8> for WindowShape {
     fn from(value: u8) -> Self {
         match value {
             0 => WindowShape::Sine,
-            1 => WindowShape::KBD,
+            1 => WindowShape::Kbd,
             2 => WindowShape::LowOverlap,
             _ => panic!("invalid value: {value}"),
         }

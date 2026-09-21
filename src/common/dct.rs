@@ -129,7 +129,7 @@ pub fn dctiv(data: &mut [f32]) {
 
     // get tables
     let twiddle =
-        window_tables::get_table(dct_len as u16, window_tables::WindowShape::Sine).unwrap();
+        window_tables::get_table(dct_len as u16).unwrap();
 
     // pre-twiddling
     {
@@ -292,20 +292,17 @@ mod tests {
     enum TransformType {
         _DCTI,
         _DSTI,
-        DctII,
+        _DctII,
         _DSTII,
         _DCTIII,
         _DSTIII,
         DctIV,
-        DstIV,
+        _DstIV,
     }
 
     const TTTT: [TransformType; 1] = [TransformType::DctIV]; // Transform Types To Test
 
-    const TSTT: [usize; 21] = [
-        8, 10, 16, 24, 32, 40, 48, 64, 96, 120, 128, 160, 192, 240, 256, 384, 480, 512, 768, 960,
-        1024,
-    ]; // Transform Sizes To Test
+    const TSTT: [usize; 2] = [480, 512]; // Transform Sizes To Test
 
     #[test]
     fn cmp_to_ref() {

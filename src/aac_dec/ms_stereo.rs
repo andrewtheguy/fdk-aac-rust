@@ -299,7 +299,7 @@ mod tests {
         let _ = sr_info.init(480, 3, 48000);
 
         let mut ics_info = IcsInfo::new();
-        ics_info.read(&mut bitstream_reader, &sr_info, ACFlags::ER | ACFlags::ELD);
+        ics_info.read(&mut bitstream_reader, &sr_info, ACFlags::ELD);
         (ics_info, bitstream_reader)
     }
 

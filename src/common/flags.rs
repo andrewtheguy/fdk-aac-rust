@@ -100,34 +100,10 @@ bitflags! {
     #[derive(Copy, Clone, Debug, Default, PartialEq)]
     #[repr(C)]
     pub struct ACFlags: u32 {
-        /// aacSectionDataResilienceFlag flag (from ASC): 1 means use virtual codebooks
-        const ER_VCB11 = 0x000001;
-        /// aacSpectralDataResilienceFlag flag (from ASC): 1 means use huffman codeword reordering
-        const ER_RVLC = 0x000002;
-        /// aacSectionDataResilienceFlag flag (from ASC): 1 means use virtual codebooks
-        const ER_HCR = 0x000004;
-        /// AAC Scalable
-        const SCALABLE = 0x000008;
         /// AAC-ELD
         const ELD = 0x000010;
-        /// AAC-LD
-        const LD = 0x000020;
-        /// ER syntax
-        const ER = 0x000040;
-        /// ELD Downscaled playout
-        const ELD_DOWNSCALE = 0x1000000;
         /// Frame length flag (from gaSpecificConfig or eldSpecificConfig)
         const FRAME_LENGTH = 0x8000000;
-    }
-
-    /// Element specific flags
-    #[derive(Copy, Clone, Debug, Default, PartialEq)]
-    #[repr(C)]
-    pub struct ChannelFlags: u32 {
-        /// GA AAC coupling channel element (CCE)
-        const GA_CCE = 0x000001;
-        /// Channel element is LFE
-        const LFE = 0x002000;
     }
 
     #[derive(Copy, Clone, Debug, Default, PartialEq)]

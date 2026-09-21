@@ -211,11 +211,6 @@ pub fn synthesize(data: &mut [f32], out: &mut [f32], overlap_buffer: &mut [f32])
 
     // Select LD window slope
     let coefs: &[f32] = match n {
-        120 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_120,
-        128 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_128,
-        160 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_160,
-        240 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_240,
-        256 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_256,
         480 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_480,
         512 => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_512,
         _ => &ld_filter_bank_tables::LOW_DELAY_SYNTHESIS_480,

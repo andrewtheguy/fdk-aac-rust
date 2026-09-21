@@ -108,7 +108,7 @@ use super::{
 use crate::common::{
     bs_element_id::ChannelElementId,
     enums::AudioChannel,
-    flags::{ACFlags, ChannelFlags},
+    flags::ACFlags,
     ld_filter_bank::{self},
 };
 use crate::tp_dec::TransportDec;
@@ -226,7 +226,6 @@ pub struct ChannelElement {
     common_window: bool,
     num_channels: u8,
     element_type: ChannelElementId,
-    el_flags: ChannelFlags,
     state_flags: ElState,
 }
 
@@ -243,14 +242,12 @@ impl ChannelElement {
     /// - `sr_info`: Sampling rate information.
     /// - `element_type`: Type of the element (example: SCE/CPE).
     /// - `frame_length`: Input frame length.
-    /// - `element_flags`: Element flags.
     /// - `ac_flags`: Audio codec flags.
     pub fn init(
         &mut self,
         sr_info: &SamplingRateInfo,
         element_type: ChannelElementId,
         frame_length: usize,
-        element_flags: ChannelFlags,
         ac_flags: ACFlags,
     ) {
         let num_channels = Self::get_num_channels(element_type);
@@ -276,17 +273,6 @@ impl ChannelElement {
         self.prev_spectral_data = vec![0.0_f32; num_channels * frame_length];
         self.num_channels = num_channels as u8;
         self.element_type = element_type;
-        self.el_flags = element_flags;
-    }
-
-    /// Clears the element flags.
-    pub fn clear_flags(&mut self) {
-        self.el_flags = ChannelFlags::empty();
-    }
-
-    /// Set element flags.
-    pub fn insert_flags(&mut self, flags_to_set: ChannelFlags) {
-        self.el_flags.insert(flags_to_set);
     }
 
     /// Returns the number of channels in the channel element.
@@ -548,7 +534,6 @@ impl ChannelElement {
     /// # Return
     ///
     ///   - `AacDecoderError`.
-    #[expect(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         conceal_data: &mut ConcealmentData,
