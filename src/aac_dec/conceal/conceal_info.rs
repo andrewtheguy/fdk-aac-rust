@@ -102,7 +102,6 @@ use super::conceal_params::{ConcealmentMethod, ConcealmentParams};
 use crate::aac_dec::{
     channel_info::{BlockType, IcsInfo},
     constants,
-    lpd::{common::LpdMode, constants as lpd_constants, LpdData},
     sr_info::SamplingRateInfo,
 };
 use crate::common::flags::ACFlags;
@@ -202,10 +201,6 @@ pub(super) struct ConcealmentInfo {
     fade_old: f32,
     /// Last / Previous fading type.
     last_fading_type: TDfadingType,
-    /// lsf4 coefficients.
-    lsf4: [f32; lpd_constants::M_LP_FILTER_ORDER],
-    /// Gain of the last frame from TCX module.
-    last_tcx_gain: f32,
     /// Last window groups and their lengths from last frame's `IcsInfo`.
     last_window_groups: u8,
     last_window_group_length: [u8; constants::MAX_WINDOWS],
@@ -237,8 +232,6 @@ impl Default for ConcealmentInfo {
             att_grp_offset: [0; 2],
             conceal_state_old: ConcealmentState::Ok,
             last_fading_type: TDfadingType::ToSpectralMute,
-            lsf4: Default::default(),
-            last_tcx_gain: Default::default(),
             last_window_groups: Default::default(),
             last_window_group_length: Default::default(),
             is_mute_release: Default::default(),
@@ -743,7 +736,6 @@ impl ConcealmentInfo {
     ///
     /// - `mode`: Mode to indicate operation to be performed inside this function
     /// - `num_fade_out_frames`: Number of fade out frames
-    /// - `last_lpd_mode`: Last lpd mode from LpdData (or) 0 in case of LpdData is not available
     /// - `ics_info`: Individual channel stream info with valid internal data
     /// - `spectral_coefficient`: Spectral coefficients of current frame
     /// - `spectral_coefficient_prev`: Spectral coefficients of previous frame
@@ -751,7 +743,6 @@ impl ConcealmentInfo {
         &mut self,
         mode: FadeOutOperation,
         num_fade_out_frames: usize,
-        last_lpd_mode: LpdMode,
         ics_info: &mut IcsInfo,
         spectral_coefficient: &mut [f32],
         spectral_coefficient_prev: &mut [f32],
@@ -767,24 +758,14 @@ impl ConcealmentInfo {
         let mut src_grp_start = 0_usize;
 
         // Set old window parameters.
-        if self.last_render_mode == AacDecoderRenderMode::Lpd {
-            (num_windows, src_grp_start, window_len) = match last_lpd_mode {
-                LpdMode::Tcx20 => (4, 3, samples_per_frame >> 2),
-                LpdMode::Tcx40 => (2, 1, samples_per_frame >> 1),
-                LpdMode::Tcx80 => (1, 0, samples_per_frame),
-                _ => (1, 0, samples_per_frame), // Equal to default init values.
-            };
-            self.last_win_grp_len = 1;
-        } else {
-            ics_info.set_window_shape(self.window_shape);
-            ics_info.set_window_sequence(self.window_sequence);
+        ics_info.set_window_shape(self.window_shape);
+        ics_info.set_window_sequence(self.window_sequence);
 
-            if self.window_sequence == BlockType::Short {
-                // Short block handling.
-                num_windows = 8;
-                window_len = samples_per_frame >> 3;
-                src_grp_start = num_windows - usize::from(self.last_win_grp_len);
-            }
+        if self.window_sequence == BlockType::Short {
+            // Short block handling.
+            num_windows = 8;
+            window_len = samples_per_frame >> 3;
+            src_grp_start = num_windows - usize::from(self.last_win_grp_len);
         }
 
         let att_idx_stride = (num_windows as i32 / (self.last_win_grp_len + 1) as i32).max(1);
@@ -866,14 +847,12 @@ impl ConcealmentInfo {
     /// - `ics_info`: Individual channel stream info with valid internal data
     /// - `spectral_coefficient`: Spectral coefficients of current frame
     /// - `spectral_coefficient_prev`: Spectral coefficients of previous frame
-    /// - `last_lpd_mode`: Last lpd mode from LpdData (or) 0 in case of LpdData is not available
     fn apply_noise(
         &mut self,
         num_fade_out_frames: usize,
         ics_info: &mut IcsInfo,
         spectral_coefficient: &mut [f32],
         spectral_coefficient_prev: &mut [f32],
-        last_lpd_mode: LpdMode,
     ) {
         let samples_per_frame = spectral_coefficient.len();
         assert!((120..=constants::MAX_FRAMESIZE).contains(&samples_per_frame));
@@ -884,7 +863,6 @@ impl ConcealmentInfo {
             ConcealmentState::Single | ConcealmentState::FadeOut => self.apply_fade_out(
                 FadeOutOperation::RandomSignMuteSpectral,
                 num_fade_out_frames,
-                last_lpd_mode,
                 ics_info,
                 spectral_coefficient,
                 spectral_coefficient_prev,
@@ -914,63 +892,41 @@ impl ConcealmentInfo {
     /// # Parameters
     ///
     /// - `conceal_method`: Type of concealment methods/techniques
-    /// - `render_mode`: Type of AAC decoder's render mode (AacDecoderRenderMode)
     /// - `ics_info`: Individual channel stream info with valid internal data
     /// - `spectral_coefficient`: Spectral coefficients of current frame
     /// - `spectral_coefficient_prev`: Spectral coefficients of previous frame
-    /// - `lpc4_lsf`: lpc4_lsf coefficients values from LpdData if available
-    /// - `tcx_gain`: last(previous) frame gain from TCX
-    /// - `lpd_frame_mode`: Mode of specific (constants::NB_DIV - 1) Lpd frame
-    #[expect(clippy::too_many_arguments)]
     fn store(
         &mut self,
         conceal_method: ConcealmentMethod,
-        render_mode: AacDecoderRenderMode,
         ics_info: &mut IcsInfo,
         spectral_coefficient: &mut [f32],
         spectral_coefficient_prev: &mut [f32],
-        lpc4_lsf: &[f32],
-        tcx_gain: f32,
-        lpd_frame_mode: LpdMode,
     ) {
-        if !(render_mode == AacDecoderRenderMode::Lpd) || !lpd_frame_mode.is_acelp() {
-            if conceal_method < ConcealmentMethod::Inter {
-                // Store new spectral bins.
-                spectral_coefficient_prev.copy_from_slice(spectral_coefficient);
-            } else {
-                // Swap spectral data.
-                spectral_coefficient.swap_with_slice(spectral_coefficient_prev);
-            }
+        if conceal_method < ConcealmentMethod::Inter {
+            // Store new spectral bins.
+            spectral_coefficient_prev.copy_from_slice(spectral_coefficient);
+        } else {
+            // Swap spectral data.
+            spectral_coefficient.swap_with_slice(spectral_coefficient_prev);
         }
 
-        if render_mode != AacDecoderRenderMode::Lpd {
-            // Store old window infos for swapping.
-            let window_sequence = self.window_sequence;
-            let window_shape = self.window_shape;
+        // Store old window infos for swapping.
+        let window_sequence = self.window_sequence;
+        let window_shape = self.window_shape;
 
-            // Store new window infos.
-            self.window_sequence = ics_info.window_sequence();
-            self.window_shape = ics_info.window_shape();
-            self.last_window_groups = ics_info.n_window_groups() as u8;
+        // Store new window infos.
+        self.window_sequence = ics_info.window_sequence();
+        self.window_shape = ics_info.window_shape();
+        self.last_window_groups = ics_info.n_window_groups() as u8;
 
-            self.last_window_group_length
-                .copy_from_slice(ics_info.window_group_lengths());
-            self.last_win_grp_len = ics_info.window_group_length(ics_info.n_window_groups() - 1);
+        self.last_window_group_length
+            .copy_from_slice(ics_info.window_group_lengths());
+        self.last_win_grp_len = ics_info.window_group_length(ics_info.n_window_groups() - 1);
 
-            if conceal_method >= ConcealmentMethod::Inter {
-                // Complete swapping of window infos.
-                ics_info.set_window_sequence(window_sequence);
-                ics_info.set_window_shape(window_shape);
-            }
-        } else {
-            // Set window info.
-            self.window_shape = WindowShape::Sine;
-            self.window_sequence = BlockType::Long; // default type
-
-            // Store LSF4.
-            self.lsf4.copy_from_slice(lpc4_lsf);
-            // Store TCX gain.
-            self.last_tcx_gain = tcx_gain;
+        if conceal_method >= ConcealmentMethod::Inter {
+            // Complete swapping of window infos.
+            ics_info.set_window_sequence(window_sequence);
+            ics_info.set_window_shape(window_shape);
         }
     }
 
@@ -981,7 +937,6 @@ impl ConcealmentInfo {
     /// # Parameters
     ///
     /// - `conceal_params`: Concealment params instance with valid data
-    /// - `last_lpd_mode`: Last lpd mode from LpdData (or) 0 in case of LpdData is not available
     /// - `ics_info`: Individual channel stream info with valid internal data
     /// - `spectral_coefficient`: Spectral coefficients of current frame
     /// - `spectral_coefficient_prev`: Spectral coefficients of previous frame
@@ -989,7 +944,6 @@ impl ConcealmentInfo {
     fn update_state(
         &mut self,
         conceal_params: &ConcealmentParams,
-        last_lpd_mode: LpdMode,
         ics_info: &mut IcsInfo,
         spectral_coefficient: &mut [f32],
         spectral_coefficient_prev: &mut [f32],
@@ -1024,7 +978,6 @@ impl ConcealmentInfo {
                                 self.apply_fade_out(
                                     FadeOutOperation::CountFadeFrames,
                                     conceal_params.num_fade_out_frames.try_into().unwrap(),
-                                    last_lpd_mode,
                                     ics_info,
                                     spectral_coefficient,
                                     spectral_coefficient_prev,
@@ -1052,7 +1005,6 @@ impl ConcealmentInfo {
                             self.apply_fade_out(
                                 FadeOutOperation::CountFadeFrames,
                                 conceal_params.num_fade_out_frames.try_into().unwrap(),
-                                last_lpd_mode,
                                 ics_info,
                                 spectral_coefficient,
                                 spectral_coefficient_prev,
@@ -1092,7 +1044,6 @@ impl ConcealmentInfo {
                                 self.apply_fade_out(
                                     FadeOutOperation::CountFadeFrames,
                                     conceal_params.num_fade_out_frames.try_into().unwrap(),
-                                    last_lpd_mode,
                                     ics_info,
                                     spectral_coefficient,
                                     spectral_coefficient_prev,
@@ -1146,7 +1097,6 @@ impl ConcealmentInfo {
                             self.apply_fade_out(
                                 FadeOutOperation::CountFadeFrames,
                                 conceal_params.num_fade_out_frames.try_into().unwrap(),
-                                last_lpd_mode,
                                 ics_info,
                                 spectral_coefficient,
                                 spectral_coefficient_prev,
@@ -1276,7 +1226,6 @@ impl ConcealmentInfo {
     pub(super) fn apply(
         &mut self,
         conceal_params: &ConcealmentParams,
-        lpd_data_option: Option<&mut LpdData>,
         ics_info: &mut IcsInfo,
         sr_info: &SamplingRateInfo,
         spectral_coefficient: &mut [f32],
@@ -1290,15 +1239,11 @@ impl ConcealmentInfo {
             && ((self.cnt_valid_frames + 1) <= conceal_params.num_mute_release_frames);
 
         if !self.is_conceal_defined {
-            if *render_mode == AacDecoderRenderMode::Lpd {
-                self.window_shape = WindowShape::Sine; //Sine window
-            } else {
-                // Initialize window_shape with same value as in the current (parsed)
-                // frame. Because section 4.6.11.3.2 (Windowing and block switching) of
-                // ISO/IEC 14496-3:2009 says: For the first raw_data_block() to be decoded
-                // the window_shape of the left and right half of the window are identical.
-                self.window_shape = ics_info.window_shape();
-            }
+            // Initialize window_shape with same value as in the current (parsed)
+            // frame. Because section 4.6.11.3.2 (Windowing and block switching) of
+            // ISO/IEC 14496-3:2009 says: For the first raw_data_block() to be decoded
+            // the window_shape of the left and right half of the window are identical.
+            self.window_shape = ics_info.window_shape();
 
             self.is_conceal_defined = true; // Conceal window_shape has been updated.
         }
@@ -1306,38 +1251,13 @@ impl ConcealmentInfo {
         if is_frame_ok && !self.is_mute_release {
             // Update render mode if frameOk except for ongoing mute release state.
             self.last_render_mode = *render_mode;
-            {
-                if let Some(lpd_data) = &lpd_data_option {
-                    let lpc4_lsf = lpd_data.lpc4_lsf();
-                    // Get mode of specific LPD frame.
-                    let lpd_frame_mode = lpd_data.lpd_frame_mode(lpd_constants::NB_DIV - 1);
-                    // Rescue current data for concealment in future frames.
-                    self.store(
-                        conceal_params.method,
-                        *render_mode,
-                        ics_info,
-                        spectral_coefficient,
-                        spectral_coefficient_prev,
-                        lpc4_lsf,
-                        lpd_data.last_tcx_gain(),
-                        lpd_frame_mode,
-                    );
-                } else {
-                    let lpc4_lsf = [0.0f32; 0];
-                    let lpd_frame_mode = LpdMode::Acelp;
-                    // Rescue current data for concealment in future frames.
-                    self.store(
-                        conceal_params.method,
-                        *render_mode,
-                        ics_info,
-                        spectral_coefficient,
-                        spectral_coefficient_prev,
-                        &lpc4_lsf[..],
-                        0.0_f32,
-                        lpd_frame_mode,
-                    );
-                }
-            }
+            // Rescue current data for concealment in future frames.
+            self.store(
+                conceal_params.method,
+                ics_info,
+                spectral_coefficient,
+                spectral_coefficient_prev,
+            );
             // Reset index to random sign vector to make sign calculation frame agnostic
             // (only depends on number of subsequently concealed spectral blocks).
             self.random_phase = 0;
@@ -1352,58 +1272,19 @@ impl ConcealmentInfo {
             *render_mode = self.last_render_mode;
         }
 
-        let last_lpd_mode = if let Some(lpd_data) = lpd_data_option {
-            let last_lpd_mode = lpd_data.last_lpd_mode;
-            // Hand current frame status to the state machine.
-            self.update_state(
-                conceal_params,
-                last_lpd_mode,
-                ics_info,
-                spectral_coefficient,
-                spectral_coefficient_prev,
-                is_frame_ok,
-            );
+        // Hand current frame status to the state machine.
+        self.update_state(
+            conceal_params,
+            ics_info,
+            spectral_coefficient,
+            spectral_coefficient_prev,
+            is_frame_ok,
+        );
 
-            if !is_frame_ok
-                && *render_mode == AacDecoderRenderMode::Imdct
-                && ac_flags.contains(ACFlags::USAC)
-            {
-                // LPC extrapolation.
-                lpd_data.lpc_extrapolation(self.last_render_mode == AacDecoderRenderMode::Imdct);
-                self.lsf4.copy_from_slice(lpd_data.lpc4_lsf());
-            }
-
-            // Create data for signal rendering according to the selected concealment
-            // method and decoder operating mode.
-            if (!is_frame_ok || self.is_mute_release) && (*render_mode == AacDecoderRenderMode::Lpd)
-            {
-                // Restore old LSF4.
-                lpd_data.lpc4_lsf_mut().copy_from_slice(&self.lsf4);
-                // Restore old TCX gain.
-                lpd_data.set_last_tcx_gain(self.last_tcx_gain);
-            }
-
-            if ac_flags.contains(ACFlags::USAC) {
-                lpd_data.set_was_last_last_frame_ok(lpd_data.was_last_frame_ok());
-                lpd_data.set_was_last_frame_ok(is_frame_ok);
-            }
-            last_lpd_mode // Return value for later usage.
-        } else {
-            // Hand current frame status to the state machine.
-            self.update_state(
-                conceal_params,
-                LpdMode::Acelp, // Note: It is default case in apply_fade_out.
-                ics_info,
-                spectral_coefficient,
-                spectral_coefficient_prev,
-                is_frame_ok,
-            );
-            LpdMode::Acelp // last_lpd_mode - Return value for later usage.
-        };
-
+        // Create data for signal rendering according to the selected concealment
+        // method.
         {
-            // Get mode of specific LPD frame.
-            if !(*render_mode == AacDecoderRenderMode::Lpd) || !last_lpd_mode.is_acelp() {
+            {
                 match conceal_params.method {
                     ConcealmentMethod::None | ConcealmentMethod::Mute => {
                         if !is_frame_ok {
@@ -1420,7 +1301,6 @@ impl ConcealmentInfo {
                             ics_info,
                             spectral_coefficient,
                             spectral_coefficient_prev,
-                            last_lpd_mode,
                         );
                     }
                     ConcealmentMethod::Inter => {
@@ -1433,20 +1313,6 @@ impl ConcealmentInfo {
                             is_frame_ok,
                         );
                     }
-                }
-            } else if !is_frame_ok || self.is_mute_release {
-                // Simply restore the buffer.
-
-                // Restore window infos.
-                ics_info.set_window_sequence(self.window_sequence);
-                ics_info.set_window_shape(self.window_shape);
-
-                if self.conceal_state != ConcealmentState::Mute {
-                    // Restore spectral bins.
-                    spectral_coefficient.copy_from_slice(spectral_coefficient_prev);
-                } else {
-                    // Clear buffer.
-                    spectral_coefficient.fill(0.0f32);
                 }
             }
         }

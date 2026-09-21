@@ -190,9 +190,7 @@ impl IcsInfo {
             self.window_sequence = BlockType::Long;
             self.window_shape = WindowShape::Sine;
         } else {
-            if !ac_flags.contains(ACFlags::USAC) {
-                bs.push(1);
-            }
+            bs.push(1);
             self.window_sequence = match bs.read(2) {
                 0 => BlockType::Long,
                 1 => BlockType::Start,
@@ -220,7 +218,7 @@ impl IcsInfo {
         }
 
         if self.is_long_block() {
-            if !ac_flags.intersects(ACFlags::ELD | ACFlags::SCALABLE | ACFlags::USAC)
+            if !ac_flags.intersects(ACFlags::ELD | ACFlags::SCALABLE)
                 && bs.read_bit() != 0
             // If not ELD nor Scalable nor BSAC nor USAC syntax then ...
             {

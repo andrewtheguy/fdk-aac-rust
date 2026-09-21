@@ -96,12 +96,7 @@ amm-info@iis.fraunhofer.de
 // Modules
 pub mod audio_specific_config;
 mod eld_specific_config;
-mod ga_specific_config;
 mod helper_functions;
-pub mod usac_config;
-pub mod usac_ext_element_config;
 
 // Re-exports
 pub use audio_specific_config::AudioSpecificConfig;
-pub use usac_config::UsacConfig;
-pub use usac_ext_element_config::{UsacElementConfig, UsacExtElementConfig};

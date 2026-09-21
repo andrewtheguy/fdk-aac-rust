@@ -99,11 +99,9 @@ amm-info@iis.fraunhofer.de
 use crate::{
     aac_dec::{
         channel::{ChannelElement, CommonChannelData, ElState},
-        channel_info::BlockType,
         conceal::ConcealmentData,
         config::Config,
         error_codes::{AacDecoderError, Cluster},
-        ext_data::ExtensionData,
         output_info::OutputInfo,
         params::Params,
         sr_info::SamplingRateInfo,
@@ -111,10 +109,9 @@ use crate::{
     common::{
         bs_element_id::ChannelElementId,
         channel_map_descr::ChannelMapDescriptor,
-        flags::{AACDecFlags, ACFlags, ChannelFlags},
+        flags::{AACDecFlags, ACFlags},
     },
-    sbr_dec::constants::MAX_EL_CHANNELS,
-    tp_dec::{ProgramConfig, ReconfigState, TransportDec},
+    tp_dec::{ReconfigState, TransportDec},
 };
 
 /// AAC decoder initialization state.
@@ -140,9 +137,6 @@ pub struct Process {
 
     /// Common channel data for the AAC decoder.
     pub common_channel_data: CommonChannelData,
-
-    /// AAC Decoder Coupling Channel Element (CCE).
-    pub channel_element_cce: Option<Box<ChannelElement>>,
 
     /// A vector of structures representing the AAC decoder channel elements
     /// with length and capacity.
@@ -170,7 +164,6 @@ impl Process {
     /// # Parameters
     ///
     /// - `decoder_config`: AAC decoder configuration.
-    /// - `program_config_element`: PCE structure.
     /// - `config_mode`: Reconfiguration state.
     /// - `config_changed`: Indictaes whetehr teh configuration has changed.
     ///
@@ -180,7 +173,6 @@ impl Process {
     pub fn init(
         &mut self,
         decoder_config: &Config,
-        program_config_element: &ProgramConfig,
         config_mode: ReconfigState,
         config_changed: bool,
     ) -> Result<(), AacDecoderError> {
@@ -190,7 +182,7 @@ impl Process {
         sampling_rate_info.init(
             decoder_config.frame_length,
             decoder_config.sampling_frequency_index.into(),
-            decoder_config.sampling_frequency * u32::from(decoder_config.ds_factor),
+            decoder_config.sampling_frequency,
         )?;
 
         if config_mode == ReconfigState::AllocMem {
@@ -209,18 +201,9 @@ impl Process {
                         self.channel_elements.push(ChannelElement::new());
                         let current_ch_element = self.channel_elements.len() - 1;
 
-                        let instance_tag: u8 = if decoder_config.channel_config != 0 {
-                            255
-                        } else {
-                            program_config_element.get_element_associated_instance_tag(
-                                current_ch_element,
-                                el_cfg.element_type,
-                            )
-                        };
                         self.channel_elements[current_ch_element].init(
                             &sampling_rate_info,
                             el_cfg.element_type,
-                            instance_tag,
                             decoder_config.frame_length.into(),
                             el_cfg.el_flags,
                             decoder_config.ac_flags,
@@ -233,30 +216,9 @@ impl Process {
                     return self.bail_from_init();
                 }
 
-                self.common_channel_data.init(
-                    &sampling_rate_info,
-                    decoder_config.num_channel_elements == ch,
-                    decoder_config.ac_flags,
-                );
+                self.common_channel_data.init(&sampling_rate_info);
 
                 self.conceal_data.init(decoder_config.num_channels.into());
-
-                if !decoder_config
-                    .ac_flags
-                    .intersects(ACFlags::USAC | ACFlags::ER)
-                    && decoder_config.num_channels > 2
-                {
-                    self.channel_element_cce = Some(Box::new(ChannelElement::new()));
-
-                    self.channel_element_cce.as_mut().unwrap().init(
-                        &sampling_rate_info,
-                        ChannelElementId::Cce,
-                        255,
-                        decoder_config.frame_length.into(),
-                        ChannelFlags::GA_CCE,
-                        decoder_config.ac_flags,
-                    );
-                }
 
                 self.num_core_channels = decoder_config.num_channels;
                 self.init_state = InitState::Startup;
@@ -270,12 +232,7 @@ impl Process {
 
     /// De-initializes the AAC decoder core.
     pub fn deinit(&mut self) {
-        self.channel_element_cce = None;
-
         self.conceal_data.deinit_conceal_info();
-
-        self.common_channel_data.er_hcr_data = None;
-        self.common_channel_data.pulse_data = None;
 
         self.channel_elements.clear();
         self.channel_elements.shrink_to_fit();
@@ -284,13 +241,9 @@ impl Process {
     }
 
     /// Resets AAC core decoder.
-    ///
-    /// # Parameters
-    ///
-    /// - `ac_flags`: Audio codec flags.
-    pub fn reset(&mut self, ac_flags: ACFlags) {
+    pub fn reset(&mut self) {
         for el in &mut self.channel_elements {
-            el.reset(ac_flags);
+            el.reset();
         }
     }
 
@@ -304,28 +257,23 @@ impl Process {
     /// # Parameters
     ///
     /// - `tp_dec_option`: Optional transport decoder.
-    /// - `extension_data`: Bitstream extension data.
     /// - `work_buffer_core`: Work buffer for spectral data.
     /// - `map_descr`: Channel map descriptors.
     /// - `flags`: AAC decoder flags.
     /// - `time_data`: Time domain output buffer.
     /// - `decoder_config`: AAC decoder configuration.
-    /// - `preroll_au_length`: Length of the preroll AU. `None` for non-USAC bitstreams.
     ///
     /// # Returns
     /// - `OutputInfo` containing information about the decoded output, and in case of an error,
     ///   also the error code.
-    #[expect(clippy::too_many_arguments)]
     pub fn decode_frame(
         &mut self,
         tp_dec_option: Option<&mut TransportDec>,
-        extension_data: &mut ExtensionData,
         work_buffer_core: &mut [f32],
         map_descr: &mut ChannelMapDescriptor,
         flags: AACDecFlags,
         time_data: &mut Option<&mut [f32]>,
         decoder_config: &mut Config,
-        preroll_au_length: Option<u32>,
     ) -> Result<OutputInfo, (AacDecoderError, OutputInfo)> {
         if let Some(time_data) = time_data.as_ref() {
             if time_data.len()
@@ -335,7 +283,6 @@ impl Process {
                     Err(AacDecoderError::OutputBufferTooSmall),
                     decoder_config,
                     map_descr,
-                    extension_data,
                 );
             }
         }
@@ -347,7 +294,6 @@ impl Process {
                 Err(AacDecoderError::Unknown),
                 decoder_config,
                 map_descr,
-                extension_data,
             );
         }
 
@@ -357,20 +303,13 @@ impl Process {
                 Err(AacDecoderError::Unknown),
                 decoder_config,
                 map_descr,
-                extension_data,
             );
         }
 
         let mut decode_state = Ok(());
         // Read bitstream.
         if !flags.intersects(AACDecFlags::CONCEAL | AACDecFlags::FLUSH) {
-            decode_state = self.read(
-                tp_dec_option.unwrap(),
-                extension_data,
-                work_buffer_core,
-                decoder_config,
-                preroll_au_length,
-            );
+            decode_state = self.read(tp_dec_option.unwrap(), work_buffer_core, decoder_config);
 
             // Early termination. Parse and validate access unit only since no output
             // buffer is given.
@@ -379,7 +318,6 @@ impl Process {
                     decode_state,
                     decoder_config,
                     map_descr,
-                    extension_data,
                 );
             }
 
@@ -403,7 +341,6 @@ impl Process {
                 decode_state,
                 decoder_config,
                 map_descr,
-                extension_data,
             );
         }
 
@@ -411,7 +348,6 @@ impl Process {
             // Render time signal.
             if self
                 .render(
-                    extension_data,
                     time_data,
                     work_buffer_core,
                     map_descr,
@@ -432,18 +368,7 @@ impl Process {
         }
 
         // Update decoder output info and return.
-        self.create_output_info(decode_state, decoder_config, map_descr, extension_data)
-    }
-
-    /// Signals a bit stream interruption to the decoder.
-    ///
-    /// # Parameters
-    ///
-    /// - `ac_flags`: Audio codec flags.
-    pub fn signal_interruption(&mut self, ac_flags: ACFlags) {
-        for el in &mut self.channel_elements {
-            el.interrupt(ac_flags);
-        }
+        self.create_output_info(decode_state, decoder_config, map_descr)
     }
 
     /// Update parameters if something has changed.
@@ -480,13 +405,25 @@ impl Process {
     // Processing - internal sub-functions
 
     /// Processing pt. I: Reads the bitstream data.
+    ///
+    /// The access unit holds what the element table of the configuration lists: the
+    /// channel element, the ER extension element, which carries nothing that is
+    /// decoded here, and the terminator.
+    ///
+    /// # Parameters
+    ///
+    /// - `tp_dec`: Transport decoder.
+    /// - `scratch_buffer`: Work buffer for spectral data.
+    /// - `decoder_config`: AAC decoder configuration.
+    ///
+    /// # Return
+    ///
+    /// - `Result<(), AacDecoderError>`
     fn read(
         &mut self,
         tp_dec: &mut TransportDec,
-        extension_data: &mut ExtensionData,
         scratch_buffer: &mut [f32],
         decoder_config: &mut Config,
-        preroll_au_length: Option<u32>,
     ) -> Result<(), AacDecoderError> {
         let mut error_status = Ok(());
 
@@ -494,8 +431,6 @@ impl Process {
 
         // Current element type.
         let mut el_type = ChannelElementId::None;
-        // Index of channel element being processed. 255 means: Not an audio channel element.
-        let mut channel_element_index = 255;
 
         // Element counter used for bistream syntax using explicit elements list.
         let mut element_count = 0;
@@ -504,99 +439,8 @@ impl Process {
         // Channel counter for channels found in the bitstream
         let mut aac_channels = 0;
 
-        if decoder_config.ac_flags.contains(ACFlags::USAC) {
-            decoder_config.ac_flags.remove(ACFlags::INDEP);
-            if tp_dec.bs.valid_bits() <= 0 {
-                error_status = Err(AacDecoderError::DecodeFrameError);
-            } else {
-                if tp_dec.bs.read_bit() != 0 {
-                    decoder_config.ac_flags.insert(ACFlags::INDEP);
-                } else if self.init_state == InitState::Startup {
-                    // Decoding cannot start on a frame which is no independent frame.
-                    error_status = Err(AacDecoderError::DecodeFrameError);
-                }
-
-                // If the last frame was broken and this frame is no independent frame
-                // correct decoding is impossible - trigger concealment.
-                if !self.conceal_data.was_last_frame_ok()
-                    && !decoder_config.ac_flags.contains(ACFlags::INDEP)
-                {
-                    error_status = Err(AacDecoderError::DecodeFrameError);
-                }
-            }
-        }
-
         while (error_status == Ok(())) && (el_type != ChannelElementId::End) {
-            let mut element_instance_tag = 255;
-
-            if !decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-            {
-                el_type = ChannelElementId::from(tp_dec.bs.read(3));
-                element_instance_tag = tp_dec.bs.read(4) as u8;
-                tp_dec.bs.push(-4);
-
-                if el_type.is_channel_element() {
-                    if channel_element_count >= decoder_config.num_channel_elements.into() {
-                        error_status = Err(AacDecoderError::ParseError);
-                        break;
-                    }
-                    if self.init_state == InitState::Startup {
-                        // Exceptions because of not standard conform encoder implementations.
-                        if el_type == ChannelElementId::Sce {
-                            match self.channel_elements[channel_element_count].element_type() {
-                                ChannelElementId::Cpe => {
-                                    // PS streams using CPE instead of SCE when setting up the
-                                    // decoder.
-                                    if decoder_config.num_channel_elements == 1 {
-                                        self.channel_elements[channel_element_count]
-                                            .set_element_type(ChannelElementId::Sce);
-                                        self.channel_elements[channel_element_count]
-                                            .set_num_channels(1);
-                                        self.num_core_channels = 1;
-
-                                        decoder_config.element_config[0]
-                                            .el_flags
-                                            .insert(ChannelFlags::PS_POSSIBLE);
-                                        // Element type has changed, reinit SBR if it is enabled.
-                                        if decoder_config.ac_flags.contains(ACFlags::SBR_PRESENT) {
-                                            extension_data.interrupt(decoder_config, false);
-                                        }
-                                    }
-                                }
-                                ChannelElementId::Lfe => {
-                                    // Multichannel streams using SCE instead of LFE.
-                                    self.channel_elements[channel_element_count]
-                                        .set_element_type(ChannelElementId::Sce);
-                                    self.channel_elements[channel_element_count]
-                                        .remove_flags(ChannelFlags::LFE);
-                                }
-                                _ => {}
-                            }
-                        }
-                        // Very first audio channel alement instance tag may be necessary to
-                        // parse extension data.
-                        if el_type.is_channel_element() && channel_element_count == 0 {
-                            let instance_tag =
-                                self.channel_elements[channel_element_count].element_instance_tag();
-                            extension_data.set_first_channel_element_instance_tag(
-                                if instance_tag == 255 {
-                                    element_instance_tag
-                                } else {
-                                    instance_tag
-                                },
-                            );
-                        }
-                    } // is_startup_phase
-                    if self.channel_elements[channel_element_count].element_type() != el_type {
-                        error_status = Err(AacDecoderError::ParseError);
-                        break;
-                    }
-                } // is_channel_element
-            } else {
-                el_type = decoder_config.element_config[element_count].element_type;
-            }
+            el_type = decoder_config.element_config[element_count].element_type;
 
             if tp_dec.bs.valid_bits() < 0 {
                 error_status = Err(AacDecoderError::DecodeFrameError);
@@ -606,33 +450,13 @@ impl Process {
             if el_type.is_channel_element() {
                 let el_channels = self.channel_elements[channel_element_count].num_channels();
 
-                let mut ch_offset = aac_channels;
-                channel_element_index = channel_element_count;
+                let el_start = usize::from(aac_channels) * usize::from(decoder_config.frame_length);
+                let el_len = usize::from(el_channels) * usize::from(decoder_config.frame_length);
 
-                if !decoder_config
-                    .ac_flags
-                    .intersects(ACFlags::USAC | ACFlags::ER)
-                    && (decoder_config.channel_config == 0
-                        || self.init_state == InitState::Complete)
-                {
-                    channel_element_index = self.get_element_index(element_instance_tag, el_type);
-                    if channel_element_index == 255 {
-                        error_status = Err(AacDecoderError::ParseError);
-                        break;
-                    }
-                    ch_offset = self.get_channel_offset(channel_element_index);
-                }
-
-                // Note: `Some(scratch_buffer)` always works here - `None` is for a CCE only.
-                error_status = self.channel_elements[channel_element_index].read(
+                error_status = self.channel_elements[channel_element_count].read(
                     &mut self.common_channel_data,
                     tp_dec,
-                    Some(
-                        &mut scratch_buffer
-                            [usize::from(ch_offset) * usize::from(decoder_config.frame_length)..],
-                    ),
-                    usize::from(el_channels) * usize::from(decoder_config.frame_length),
-                    decoder_config.aot,
+                    &mut scratch_buffer[el_start..el_start + el_len],
                     decoder_config.ac_flags,
                 );
 
@@ -642,48 +466,17 @@ impl Process {
 
                 channel_element_count += 1;
                 aac_channels += el_channels;
-            } else if !decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-                && (el_type == ChannelElementId::Cce)
-            {
-                if decoder_config.channel_config == 0 {
-                    // Check whether the element belongs to current program.
-                    if let Some(pce) = extension_data.pce.as_ref() {
-                        if !pce.validate_non_audio_element_instance_tag(
-                            element_instance_tag,
-                            ChannelElementId::Cce,
-                        ) {
-                            error_status = Err(AacDecoderError::DecodeFrameError);
-                            break;
-                        }
-                    }
-                }
-
-                if let Some(cce) = self.channel_element_cce.as_mut() {
-                    // Parse CCE.
-                    error_status = cce.read(
-                        &mut self.common_channel_data,
-                        tp_dec,
-                        None,
-                        decoder_config.frame_length.into(),
-                        decoder_config.aot,
-                        decoder_config.ac_flags,
-                    );
-                } else {
-                    error_status = Err(AacDecoderError::DecodeFrameError);
-                }
-
-                if error_status != Ok(()) {
-                    break;
-                }
+            } else if el_type == ChannelElementId::Ext {
+                // In ER bitstream syntax the extensions payloads are at the very end of the
+                // access unit. Skip them.
+                let au_bits_remaining = tp_dec.remaining_au_bits();
+                tp_dec.bs.push(au_bits_remaining);
             } else if el_type == ChannelElementId::End {
                 error_status = self.end_raw_data_block(
                     tp_dec,
                     decoder_config,
                     channel_element_count as u8,
                     aac_channels,
-                    preroll_au_length,
                     au_start_anchor,
                 );
                 if error_status != Ok(()) {
@@ -691,32 +484,9 @@ impl Process {
                 }
             }
 
-            if !(el_type.is_mp4_channel_element() || (el_type == ChannelElementId::Cce)) {
-                error_status = extension_data.read(
-                    tp_dec,
-                    decoder_config,
-                    el_type,
-                    channel_element_index as u8,
-                    channel_element_count as u8,
-                    element_count as u8,
-                    au_start_anchor,
-                );
-                if error_status != Ok(()) {
-                    break;
-                }
-            }
-
-            if !(el_type).is_channel_element() {
-                channel_element_index = 255;
-            }
-            if decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-            {
-                element_count += 1;
-                if element_count >= decoder_config.num_elements.into() {
-                    break;
-                }
+            element_count += 1;
+            if element_count >= decoder_config.num_elements.into() {
+                break;
             }
         } // while ( el_type != ChannelElementId::End ... )
 
@@ -727,8 +497,7 @@ impl Process {
 
         if error_status != Ok(()) {
             // Push the bitbuffer to the end of the raw_data_block().
-            let trailing_bits =
-                tp_dec.trailing_bits(au_start_anchor, preroll_au_length, decoder_config.ac_flags);
+            let trailing_bits = tp_dec.trailing_bits(au_start_anchor);
             tp_dec.bs.push(trailing_bits);
         }
 
@@ -749,11 +518,7 @@ impl Process {
             let el_len = el_channels * usize::from(decoder_config.frame_length);
             let this_scratch = &mut scratch_buffer[el_start..el_start + el_len];
 
-            el.decode(
-                &mut self.common_channel_data,
-                this_scratch,
-                decoder_config.ac_flags,
-            );
+            el.decode(this_scratch);
 
             aac_channels += el_channels;
         }
@@ -762,7 +527,6 @@ impl Process {
     /// Processing pt. III: Renders decoded bitstream datat to time-domain output.
     fn render(
         &mut self,
-        extension_data: &mut ExtensionData,
         time_data: &mut [f32],
         scratch_buffer: &mut [f32],
         map_descr: &mut ChannelMapDescriptor,
@@ -773,7 +537,7 @@ impl Process {
             || (flags.contains(AACDecFlags::FLUSH) && !self.conceal_data.was_last_frame_ok()));
 
         let mut aac_channels: usize = 0;
-        for (channel_element_count, el) in self.channel_elements.iter_mut().enumerate() {
+        for el in self.channel_elements.iter_mut() {
             let el_channels = usize::from(el.num_channels());
             let mapped_channel = usize::from(
                 map_descr
@@ -788,48 +552,18 @@ impl Process {
             let this_spectral_data =
                 &mut scratch_buffer[el_start_spec..el_start_spec + el_len_spec];
 
-            let is_pseudo_lr = extension_data.is_pseudo_lr(decoder_config);
-
             if AacDecoderError::Ok
                 != el.render(
                     &mut self.common_channel_data,
                     &mut self.conceal_data,
-                    &mut extension_data.drc_data.as_deref_mut(),
                     this_spectral_data,
                     this_time_data,
-                    (decoder_config.ac_flags | extension_data.implicit_ac_flags)
-                        .contains(ACFlags::SBR_PRESENT),
-                    is_pseudo_lr,
                     is_frame_ok,
                     aac_channels,
-                    flags.contains(AACDecFlags::FLUSH),
                     decoder_config.ac_flags,
                 )
             {
                 return Err(AacDecoderError::Unknown);
-            }
-
-            if !decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-            {
-                let mut window_sequence = [BlockType::Long; MAX_EL_CHANNELS];
-
-                for (ch, ch_el_info) in (el.get_element_channel_infos()).iter().enumerate() {
-                    window_sequence[ch] = ch_el_info.ics_info.window_sequence();
-                }
-
-                if extension_data
-                    .feed_drc_element(
-                        decoder_config,
-                        &window_sequence[..el_channels],
-                        aac_channels,
-                        channel_element_count,
-                    )
-                    .is_err()
-                {
-                    return Err(AacDecoderError::Unknown);
-                }
             }
 
             aac_channels += el_channels;
@@ -878,7 +612,6 @@ impl Process {
         ret_val: Result<(), AacDecoderError>,
         decoder_config: &Config,
         map_descr: &ChannelMapDescriptor,
-        extension_data: &ExtensionData,
     ) -> Result<OutputInfo, (AacDecoderError, OutputInfo)> {
         let mut output_info = OutputInfo::default();
 
@@ -897,20 +630,6 @@ impl Process {
                 output_info.channel_indices[mapped_channel] =
                     decoder_config.channel_indices[c as usize];
             }
-
-            output_info.output_loudness = if !decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-            {
-                extension_data
-                    .drc_data
-                    .as_ref()
-                    .unwrap()
-                    .output_loudness()
-                    .into()
-            } else {
-                -1
-            };
         }
 
         if let Err(e) = ret_val {
@@ -927,7 +646,6 @@ impl Process {
         decoder_config: &Config,
         channel_element_count: u8,
         aac_channels: u8,
-        preroll_au_length: Option<u32>,
         au_start_anchor: isize,
     ) -> Result<(), AacDecoderError> {
         // Check if whole number of channels and elements have been read.
@@ -943,21 +661,12 @@ impl Process {
         }
 
         // Byte alignment with respect to the first bit of the `raw_data_block()`.
-        if !decoder_config.ac_flags.contains(ACFlags::USAC) {
-            tp_dec.bs.align(au_start_anchor);
-        }
+        tp_dec.bs.align(au_start_anchor);
 
         // Check if all bits of the `raw_data_block()` have been read.
-        let trailing_bits =
-            tp_dec.trailing_bits(au_start_anchor, preroll_au_length, decoder_config.ac_flags);
+        let trailing_bits = tp_dec.trailing_bits(au_start_anchor);
 
-        if (tp_dec.remaining_au_bits() < trailing_bits)
-            || (if decoder_config.ac_flags.contains(ACFlags::USAC) {
-                (trailing_bits & !0x7) != 0
-            } else {
-                trailing_bits != 0
-            })
-        {
+        if (tp_dec.remaining_au_bits() < trailing_bits) || (trailing_bits != 0) {
             return Err(AacDecoderError::ParseError);
         }
 
@@ -967,25 +676,4 @@ impl Process {
         Ok(())
     }
 
-    /// Gets the element index for a given bitstream elemement.
-    fn get_element_index(&self, tag: u8, id: ChannelElementId) -> usize {
-        for (cnt, el) in self.channel_elements.iter().enumerate() {
-            if tag == el.element_instance_tag() && id == el.element_type() {
-                return cnt;
-            }
-        }
-        255
-    }
-
-    /// Gets the channel offset for a given bitstream elemement.
-    fn get_channel_offset(&self, el_index: usize) -> u8 {
-        let mut ch_offset = 0;
-        for (cnt, el) in self.channel_elements.iter().enumerate() {
-            if cnt == el_index {
-                break;
-            };
-            ch_offset += el.num_channels();
-        }
-        ch_offset
-    }
 }

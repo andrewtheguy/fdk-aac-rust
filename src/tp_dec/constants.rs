@@ -93,19 +93,8 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! Transport decoder constants
 
-// Next power of two from maximum of bs.escapedValue(4, 4, 8) in audio_pre_roll() (285)
-pub const TP_USAC_MAX_CONFIG_LEN: usize = 512;
-
 // Size is in bytes. 6144 bits * 8 channels = 6144 bytes
 pub const TRANSPORTDEC_INBUF_SIZE: usize = 8192;
-
-// Configuration
-/// Maximum number USAC extension elements.
-const TP_USAC_MAX_EXT_ELEMENTS: usize = 8;
-/// Maximum number USAC channel elements.
-const TP_USAC_MAX_CH_ELEMENTS: usize = 1;
-/// Maximum number USAC elements.
-pub const TP_USAC_MAX_ELEMENTS: usize = TP_USAC_MAX_CH_ELEMENTS + TP_USAC_MAX_EXT_ELEMENTS;
 
 /// Maximum supported out of band config size in byte.
 pub const MAX_CONF_SIZE: usize = 1024;

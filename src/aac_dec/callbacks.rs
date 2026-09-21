@@ -95,48 +95,10 @@ amm-info@iis.fraunhofer.de
 
 use crate::{
     aac_dec::{aacdecoder::AacDecoder, config::Config},
-    common::{
-        aot::AudioObjectType,
-        bitstream::{Bitstream, Mode},
-        bs_element_id::ChannelElementId,
-        enums::StereoCfgIndex,
-        flags::{AACDecFlags, ACFlags},
-    },
-    drc_dec::CodecMode,
-    sac_dec::SacDecoderError,
-    tp_dec::{
-        callbacks::TpDecCb, AudioSpecificConfig, ReconfigState, TpDecoderError, TransportDec,
-    },
+    tp_dec::{callbacks::TpDecCb, AudioSpecificConfig, ReconfigState, TpDecoderError},
 };
 
 impl TpDecCb for AacDecoder {
-    /// Decodes an AAC frame.
-    ///
-    /// # Parameters
-    ///
-    /// - `transport_decoder`: Transport decoder instance.
-    ///
-    /// # Return
-    ///
-    ///  - `Result<(), TpDecoderError>`.
-    fn decode_frame(&mut self, tp_dec: &mut TransportDec) -> Result<(), TpDecoderError> {
-        self.extension_data.reset();
-        self.aac_core.reset(self.config.ac_flags);
-
-        match self.aac_core.decode_frame(
-            Some(tp_dec),
-            &mut self.extension_data,
-            &mut self.work_buffer_core,
-            &mut self.map_descr,
-            AACDecFlags::empty(),
-            &mut None,
-            &mut self.config,
-            None,
-        ) {
-            Ok(_output_info) => Ok(()),
-            Err((_error, _output_info)) => Err(TpDecoderError::UnknownError),
-        }
-    }
 
     /// Frees config dependent internal memory of `AacDecoder`.
     fn free_memory(&mut self) {
@@ -147,8 +109,6 @@ impl TpDecCb for AacDecoder {
             self.work_buffer_core.clear();
             self.work_buffer_core.shrink_to_fit();
         }
-
-        self.extension_data.deinit();
     }
 
     /// Updates decoder configuration and reinitializes `AacDecoder`, in case of
@@ -189,40 +149,10 @@ impl TpDecCb for AacDecoder {
             *is_config_changed = decoder_config.is_config_change(&self.config);
         }
 
-        // If no config change detected and implicit signalling possible keep previous mps, sbr,
-        // and ps flags.
-        if !(*is_config_changed)
-            && !decoder_config
-                .ac_flags
-                .intersects(ACFlags::USAC | ACFlags::ER)
-            && decoder_config.ext_aot == AudioObjectType::AotNullObject
-        {
-            let mask = ACFlags::MPS_PRESENT | ACFlags::SBR_PRESENT | ACFlags::PS_PRESENT;
-            decoder_config.ac_flags.remove(mask);
-            decoder_config.ac_flags.insert(self.config.ac_flags & mask);
-        }
-
         // Initialize AAC core decoder, and update decoder config.
         match self
             .aac_core
-            .init(&decoder_config, asc.pce(), config_mode, *is_config_changed)
-        {
-            Ok(_) => (),
-            Err(err) => {
-                if config_mode == ReconfigState::AllocMem {
-                    self.free_memory();
-                }
-                return if err.is_init_error() {
-                    Err(TpDecoderError::UnsupportedFormat)
-                } else {
-                    Err(TpDecoderError::UnknownError)
-                };
-            }
-        }
-
-        match self
-            .extension_data
-            .init(asc.pce(), &decoder_config, config_mode, is_config_changed)
+            .init(&decoder_config, config_mode, *is_config_changed)
         {
             Ok(_) => (),
             Err(err) => {
@@ -251,164 +181,4 @@ impl TpDecCb for AacDecoder {
         Ok(())
     }
 
-    /// Parses `spatial specific config (SSC)` information.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `core_codec`: Audio object type of core codec.
-    /// - `sampling_rate`: Sampling rate value.
-    /// - `frame_size`: Frame length for core codec.
-    /// - `num_channels`: Number of channels.
-    /// - `stereo_config_index`: USAC stereo config index value.
-    /// - `core_sbr_frame_length_index`: Core SBR frame length index value.
-    /// - `config_bytes`: Configuration length in bytes.
-    /// - `config_mode`: Reconfiguration state.
-    /// - `is_config_changed`: Flag to indicate change in SAC configuration.
-    ///
-    /// # Return
-    ///
-    ///  - `Result<(), TpDecoderError>`.
-    fn ssc_parser(
-        &mut self,
-        bs: &mut Bitstream,
-        core_codec: AudioObjectType,
-        sampling_rate: u32,
-        frame_size: u16,
-        num_channels: u8,
-        stereo_config_index: StereoCfgIndex,
-        core_sbr_frame_length_index: u8,
-        config_bytes: u32,
-        config_mode: ReconfigState,
-        is_config_changed: bool,
-    ) -> Result<(), TpDecoderError> {
-        match self.extension_data.mpeg_surround_decoder.config(
-            bs,
-            core_codec,
-            sampling_rate,
-            frame_size,
-            num_channels,
-            stereo_config_index,
-            core_sbr_frame_length_index,
-            config_bytes,
-            config_mode,
-            is_config_changed,
-        ) {
-            Ok(_) => Ok(()),
-            Err(SacDecoderError::UnsupportedConfig) => Err(TpDecoderError::UnsupportedFormat),
-            Err(SacDecoderError::ParseError) => Err(TpDecoderError::ParseError),
-            Err(_) => Err(TpDecoderError::UnknownError),
-        }
-    }
-
-    /// Parses `SBR header` information.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `sampling_rate_in`: Input sampling rate value of SBR decoder.
-    /// - `sampling_rate_out`: Output sampling rate value of SBR decoder.
-    /// - `samples_per_frame`: Number of samples per frame.
-    /// - `core_codec`: Audio object type of core codec.
-    /// - `element_id`: MPEG-4 audio channel type (Element ID).
-    /// - `element_index`: SBR element index value.
-    /// - `is_harmonic_sbr`: Flag Signals the usage of the harmonic patching for the SBR.
-    /// - `config_mode`: Reconfiguration state.
-    /// - `is_config_changed`: Flag to indicate change in SBR configuration.
-    /// - `downscale_factor`: ELD downscale factor value.
-    ///
-    /// # Return
-    ///
-    ///  - `Result<(), TpDecoderError>`.
-    fn sbr_parser(
-        &mut self,
-        bs: &mut Bitstream,
-        sample_rate_in: u32,
-        sample_rate_out: u32,
-        samples_per_frame: u16,
-        core_codec: AudioObjectType,
-        element_id: ChannelElementId,
-        element_index: usize,
-        is_harmonic_sbr: bool,
-        config_mode: ReconfigState,
-        is_config_changed: &mut bool,
-        down_scale_factor: u8,
-    ) -> Result<(), TpDecoderError> {
-        let extension_data = &mut self.extension_data;
-        extension_data
-            .sbr_decoder
-            .decode_header(
-                bs,
-                &mut extension_data.qmf_domain,
-                &mut extension_data.qmf_domain_params_requested,
-                sample_rate_in,
-                sample_rate_out,
-                samples_per_frame,
-                core_codec,
-                element_id,
-                element_index,
-                is_harmonic_sbr as u8,
-                config_mode,
-                is_config_changed,
-                down_scale_factor,
-            )
-            .map_err(|_| TpDecoderError::ParseError)?;
-
-        Ok(())
-    }
-
-    /// Parses `uniDrcConfig` and `LoudnessInfoSet` information.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `payload_type`: Type of payload `uniDrcConfig` (or) `LoudnessInfoSet`.
-    /// - `aot`: Audio object type of core codec.
-    ///
-    /// # Return
-    ///
-    ///  - `Result<(), TpDecoderError>`.
-    fn uni_drc_parser(
-        &mut self,
-        bs: Option<&mut Bitstream>,
-        payload_type: u8,
-        aot: AudioObjectType,
-    ) -> Result<(), TpDecoderError> {
-        let mut dummy_bs;
-
-        let bit_stream = if let Some(bs) = bs {
-            bs
-        } else {
-            dummy_bs = Bitstream::new(4, Mode::Reader);
-            dummy_bs.init(&[0_u8; 4], 24);
-            &mut dummy_bs
-        };
-
-        let drc_dec_codec_mode = if aot == AudioObjectType::AotUsac {
-            CodecMode::MpegD_Usac
-        } else {
-            CodecMode::Undefined
-        };
-
-        self.extension_data
-            .uni_drc_decoder
-            .set_codec_mode(drc_dec_codec_mode)
-            .map_err(|_| TpDecoderError::UnknownError)?;
-
-        if payload_type == 0 {
-            // Read uniDrcConfig.
-            self.extension_data
-                .uni_drc_decoder
-                .read_uni_drc_config(bit_stream)
-                .map_err(|_| TpDecoderError::UnknownError)?;
-        } else {
-            // Read loudnessInfoSet.
-            self.extension_data
-                .uni_drc_decoder
-                .read_loudness_info_set(bit_stream)
-                .map_err(|_| TpDecoderError::UnknownError)?;
-        }
-
-        Ok(())
-    }
 }

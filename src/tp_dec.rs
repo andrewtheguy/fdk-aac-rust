@@ -99,26 +99,17 @@ pub mod callbacks;
 pub mod constants;
 pub mod error_codes;
 pub mod info;
-pub mod pce;
-mod tables;
 
 // Re-exports
 pub use {
-    asc::{AudioSpecificConfig, UsacConfig, UsacElementConfig, UsacExtElementConfig},
+    asc::AudioSpecificConfig,
     callbacks::TpDecCallBacks,
-    constants::{
-        MAX_CONF_SIZE, TP_USAC_MAX_CONFIG_LEN, TP_USAC_MAX_ELEMENTS, TRANSPORTDEC_INBUF_SIZE,
-    },
+    constants::{MAX_CONF_SIZE, TRANSPORTDEC_INBUF_SIZE},
     error_codes::TpDecoderError,
-    pce::{PceCompareResult, ProgramConfig},
 };
 
 // Imports
-use crate::common::{
-    aot::AudioObjectType,
-    bitstream::{Bitstream, Mode},
-    flags::ACFlags,
-};
+use crate::common::bitstream::{Bitstream, Mode};
 use info::TpDecInfo;
 
 // Enums
@@ -161,19 +152,6 @@ impl ReconfigState {
     fn all() -> [ReconfigState; 2] {
         [ReconfigState::DetCfgChange, ReconfigState::AllocMem]
     }
-}
-
-#[repr(C)]
-#[derive(PartialEq, Default, Debug)]
-/// Configuration Change Status.
-enum CfgChangeStatus {
-    #[default]
-    /// Not specified.
-    Undefined,
-    /// System should clear buffered data.
-    FlushOn,
-    /// Build data up in the buffer until certain condition is met.
-    BuildUp,
 }
 
 // Structs
@@ -254,8 +232,6 @@ pub struct TransportDec {
     pub bs: Bitstream,
     /// Transport decoder callbacks.
     cb: TpDecCallBacks,
-    /// Control Configuration Change.
-    status_config_change: CfgChangeStatus,
     /// Transport Decoder Data.
     pub data: TpDecData,
 }
@@ -266,7 +242,6 @@ impl Default for TransportDec {
         Self {
             bs: Default::default(),
             cb: Default::default(),
-            status_config_change: CfgChangeStatus::Undefined,
             data: Default::default(),
         }
     }
@@ -283,7 +258,6 @@ impl TransportDec {
     pub fn init(&mut self) {
         self.bs = Bitstream::new(TRANSPORTDEC_INBUF_SIZE, Mode::Reader);
         self.data.init();
-        self.status_config_change = CfgChangeStatus::Undefined;
     }
 
     /// Configures TransportDec via a binary coded AudioSpecificConfig or StreamMuxConfig.
@@ -317,12 +291,7 @@ impl TransportDec {
             let mut dummy_asc = AudioSpecificConfig::new();
             dummy_asc.init();
 
-            err = dummy_asc.parse(
-                &mut bs,
-                true,
-                &mut self.cb,
-                AudioObjectType::AotNullObject,
-            );
+            err = dummy_asc.parse(&mut bs);
 
             if err.is_ok() {
                 if self.cb.update_config_callback(&dummy_asc).is_err() {
@@ -351,105 +320,6 @@ impl TransportDec {
         if err.is_ok() && config_found {
             self.data.is_config_found = true;
         }
-
-        err
-    }
-
-    /// Configures transport decoder via a binary coded USAC `new_config`.
-    ///
-    /// # Parameters
-    ///
-    /// - `new_config`: Buffer of the binary coded config.
-    /// - `new_config_len`: Length of new config in bytes.
-    /// - `is_flush_on`: Indicates flush status on return.
-    /// - `is_build_up_on`: Indicates build up status on return.
-    /// - `is_startup_phase`: Indicates decoder start up phase.
-    ///
-    /// # Return
-    ///
-    ///   - `TpDecoderError`.
-    pub fn in_band_config(
-        &mut self,
-        new_config: &mut [u8],
-        new_config_len: usize,
-        is_flush_on: &mut bool,
-        is_build_up_on: &mut bool,
-        is_startup_phase: bool,
-    ) -> Result<(), TpDecoderError> {
-        let mut err: Result<(), TpDecoderError> = Ok(());
-        if self.status_config_change != CfgChangeStatus::FlushOn {
-            self.status_config_change = CfgChangeStatus::FlushOn;
-            if usize::from(self.data.asc.usac_config().config_length()) == new_config_len
-                && new_config == self.data.asc.usac_config().config_buffer()
-            {
-                if !is_startup_phase {
-                    // Skip flush, and build_up phase
-                    self.status_config_change = CfgChangeStatus::Undefined;
-                }
-            }
-
-            // In startup phase skip flushing and continue with build up
-            if !is_startup_phase || err.is_err() {
-                *is_flush_on = self.status_config_change == CfgChangeStatus::FlushOn;
-                *is_build_up_on = false;
-                return err;
-            }
-        }
-
-        // Decoder build up phase
-        self.status_config_change = CfgChangeStatus::BuildUp;
-
-        let mut bs = Bitstream::new(TP_USAC_MAX_CONFIG_LEN, Mode::Reader);
-        bs.init(new_config, new_config_len << 3);
-
-        for config_mode in ReconfigState::all() {
-            if config_mode == ReconfigState::AllocMem {
-                let num_bits = (new_config_len as isize) * 8 - bs.valid_bits();
-                bs.push(-num_bits);
-            }
-            self.cb.set_config_mode(config_mode);
-
-            // Config transport decoder.
-            let mut dummy_asc = AudioSpecificConfig::new();
-            dummy_asc.init();
-
-            err = dummy_asc.parse(&mut bs, false, &mut self.cb, self.data.asc.aot());
-
-            if err.is_err() {
-                break;
-            }
-
-            if self.cb.update_config_callback(&dummy_asc).is_err() {
-                err = Err(TpDecoderError::ParseError);
-                break;
-            }
-            self.data.asc = dummy_asc;
-
-            if config_mode == ReconfigState::DetCfgChange
-                && self.cb.is_config_changed()
-                && self.cb.free_mem_callback().is_err()
-            {
-                err = Err(TpDecoderError::ParseError);
-                break;
-            }
-        }
-
-        // Save new config.
-        if err.is_ok() {
-            self.data
-                .asc
-                .usac_config_mut()
-                .set_config_length(new_config_len as u16);
-            self.data.asc.usac_config_mut().config_buffer_mut()[..new_config_len]
-                .copy_from_slice(&new_config[..new_config_len]);
-            self.data.is_config_found = true;
-        } else {
-            self.data.reset();
-            self.status_config_change = CfgChangeStatus::Undefined;
-        }
-
-        *is_flush_on = false;
-        *is_build_up_on = self.status_config_change == CfgChangeStatus::BuildUp;
 
         err
     }
@@ -538,34 +408,22 @@ impl TransportDec {
         self.data.reset();
     }
 
-    /// Returns the trailing bits of the current access unit.
+    /// Returns the number of trailing bits that need to be consumed to finalize the AU parsing.
     ///
     /// # Parameters
     ///
-    /// - `au_start_anchor`: Start anchor of AU.
-    /// - `preroll_au_length`: Length of the preroll AU. Should be `None` for non-USAC bitstreams.
-    /// - `ac_flags`: Audio codec flags.
-    pub fn trailing_bits(
-        &mut self,
-        au_start_anchor: isize,
-        preroll_au_length: Option<u32>,
-        ac_flags: ACFlags,
-    ) -> isize {
+    /// - `au_start_anchor`: Bit buffer position at the beginning of the AU.
+    ///
+    /// # Return
+    ///
+    /// - `isize`: Number of trailing bits in AU.
+    pub fn trailing_bits(&mut self, au_start_anchor: isize) -> isize {
         let valid_bits = self.bs.valid_bits();
 
-        if ac_flags.contains(ACFlags::USAC) && preroll_au_length.is_some() {
-            // For pre-roll frames preroll bound has to be met
-            if let Some(preroll_au_length) = preroll_au_length {
-                valid_bits - au_start_anchor + isize::try_from(preroll_au_length).unwrap()
-            } else {
-                unreachable!()
-            }
-        } else if self.total_au_bits() > 0 {
+        if self.total_au_bits() > 0 {
             self.remaining_au_bits()
-        } else if !ac_flags.contains(ACFlags::USAC) {
-            (valid_bits - au_start_anchor) & 7
         } else {
-            0
+            (valid_bits - au_start_anchor) & 7
         }
     }
 

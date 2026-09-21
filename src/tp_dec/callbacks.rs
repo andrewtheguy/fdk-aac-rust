@@ -94,21 +94,13 @@ amm-info@iis.fraunhofer.de
 //! Transport decoder callback functions
 
 use super::{asc::AudioSpecificConfig, error_codes::TpDecoderError};
-use crate::{
-    common::{
-        aot::AudioObjectType, bitstream::Bitstream, bs_element_id::ChannelElementId,
-        enums::StereoCfgIndex,
-    },
-    tp_dec::ReconfigState,
-    tp_dec::TransportDec,
-};
+use crate::tp_dec::ReconfigState;
 
 use core::fmt::Debug;
 use std::{cell::RefCell, ops::DerefMut, rc::Rc};
 
 /// Transport decoder callback trait.
 pub trait TpDecCb: Debug {
-    fn decode_frame(&mut self, tp_dec: &mut TransportDec) -> Result<(), TpDecoderError>;
 
     fn free_memory(&mut self);
 
@@ -119,43 +111,6 @@ pub trait TpDecCb: Debug {
         is_config_changed: &mut bool,
     ) -> Result<(), TpDecoderError>;
 
-    #[expect(clippy::too_many_arguments)]
-    fn ssc_parser(
-        &mut self,
-        bs: &mut Bitstream,
-        core_codec: AudioObjectType,
-        sampling_rate: u32,
-        frame_size: u16,
-        num_channels: u8,
-        stereo_config_index: StereoCfgIndex,
-        core_sbr_frame_length_index: u8,
-        config_bytes: u32,
-        config_mode: ReconfigState,
-        is_config_changed: bool,
-    ) -> Result<(), TpDecoderError>;
-
-    #[expect(clippy::too_many_arguments)]
-    fn sbr_parser(
-        &mut self,
-        bs: &mut Bitstream,
-        sample_rate_in: u32,
-        sample_rate_out: u32,
-        samples_per_frame: u16,
-        core_codec: AudioObjectType,
-        element_id: ChannelElementId,
-        element_index: usize,
-        is_harmonic_sbr: bool,
-        config_mode: ReconfigState,
-        is_config_changed: &mut bool,
-        down_scale_factor: u8,
-    ) -> Result<(), TpDecoderError>;
-
-    fn uni_drc_parser(
-        &mut self,
-        bs: Option<&mut Bitstream>,
-        payload_type: u8,
-        aot: AudioObjectType,
-    ) -> Result<(), TpDecoderError>;
 }
 
 /// Transport decoder struct holding decoder callbacks and its data.
@@ -199,23 +154,6 @@ impl TpDecCallBacks {
         Self::default()
     }
 
-    /// Decodes a frame by invoking a callback function.
-    ///
-    /// # Return
-    /// - Result<(), TpDecoderError>
-    pub fn decode_frame_callback(
-        &mut self,
-        tp_dec: &mut TransportDec,
-    ) -> Result<(), TpDecoderError> {
-        if let Some(handle_rc) = &self.cb_data {
-            let mut handle_refcell = handle_rc.borrow_mut();
-            let handle = handle_refcell.deref_mut();
-            handle.decode_frame(tp_dec)
-        } else {
-            Err(TpDecoderError::UnknownError)
-        }
-    }
-
     /// Frees config dependent memory of `self.cb_data` by invoking a callback function.
     ///
     /// # Return
@@ -252,57 +190,6 @@ impl TpDecCallBacks {
         self.cb_data = data;
     }
 
-    /// Parses `SBR header` information by invoking a callback function.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `core_codec`: Audio object type of core codec.
-    /// - `element_id`: MPEG-4 audio channel type (Element ID).
-    /// - `sampling_rate_in`: Input sampling rate value of SBR decoder.
-    /// - `sampling_rate_out`: Output sampling rate value of SBR decoder.
-    /// - `samples_per_frame`: Number of samples per frame.
-    /// - `element_index`: SBR element index value.
-    /// - `downscale_factor`: ELD downscale factor value.
-    /// - `harmonic_sbr`: Flag Signals the usage of the harmonic patching for the SBR.
-    ///
-    /// # Return
-    /// - Result<(), TpDecoderError>
-    #[expect(clippy::too_many_arguments)]
-    pub fn sbr_callback(
-        &mut self,
-        bs: &mut Bitstream,
-        core_codec: AudioObjectType,
-        element_id: ChannelElementId,
-        sample_rate_in: u32,
-        sample_rate_out: u32,
-        samples_per_frame: u16,
-        element_index: usize,
-        downscale_factor: u8,
-        is_harmonic_sbr: bool,
-    ) -> Result<(), TpDecoderError> {
-        if let Some(handle_rc) = &self.cb_data {
-            let mut handle_refcell = handle_rc.borrow_mut();
-            let handle = handle_refcell.deref_mut();
-
-            handle.sbr_parser(
-                bs,
-                sample_rate_in,
-                sample_rate_out,
-                samples_per_frame,
-                core_codec,
-                element_id,
-                element_index,
-                is_harmonic_sbr,
-                self.config_mode,
-                &mut self.is_sbr_config_changed,
-                downscale_factor,
-            )
-        } else {
-            Err(TpDecoderError::UnknownError)
-        }
-    }
-
     /// Sets the configuration mode of the `TpDecCallBacks`.
     ///
     /// # Parameters
@@ -314,82 +201,6 @@ impl TpDecCallBacks {
             self.is_aac_config_changed = false;
             self.is_sbr_config_changed = false;
             self.is_sac_config_changed = false;
-        }
-    }
-
-    /// Parses `spatial specific config (SSC)` by invoking a callback function.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `core_codec`: Audio object type of core codec.
-    /// - `sampling_rate`: Sampling rate value.
-    /// - `frame_size`: Frame length for core codec.
-    /// - `num_channels`: Number of channels.
-    /// - `stereo_config_index`: USAC stereo config index value.
-    /// - `core_sbr_frame_length_index`: Core SBR frame length index value.
-    /// - `config_bytes`: Configuration length in bytes.
-    ///
-    /// # Return
-    /// - Result<(), TpDecoderError>
-    #[expect(clippy::too_many_arguments)]
-    pub fn ssc_callback(
-        &mut self,
-        bs: &mut Bitstream,
-        core_codec: AudioObjectType,
-        sampling_rate: u32,
-        frame_size: u16,
-        num_channels: u8,
-        stereo_config_index: StereoCfgIndex,
-        core_sbr_frame_length_index: u8,
-        config_bytes: u32,
-    ) -> Result<(), TpDecoderError> {
-        if let Some(handle_rc) = &self.cb_data {
-            let mut handle_refcell = handle_rc.borrow_mut();
-            let handle = handle_refcell.deref_mut();
-
-            handle.ssc_parser(
-                bs,
-                core_codec,
-                sampling_rate,
-                frame_size,
-                num_channels,
-                stereo_config_index,
-                core_sbr_frame_length_index,
-                config_bytes,
-                self.config_mode,
-                self.is_sac_config_changed,
-            )
-        } else {
-            Err(TpDecoderError::UnknownError)
-        }
-    }
-
-    /// Parses `uniDrcConfig` and `LoudnessInfoSet` information by invoking
-    /// a callback function.
-    ///
-    /// # Parameters
-    ///
-    /// - `bs`: Bitstream instance with valid data.
-    /// - `aot`: Audio object type of core codec.
-    /// - `payload_type`: Type of payload `uniDrcConfig` (or) `LoudnessInfoSet`.
-    ///
-    ///
-    /// # Return
-    /// - Result<(), TpDecoderError>
-    pub fn uni_drc_callback(
-        &mut self,
-        bs: Option<&mut Bitstream>,
-        payload_type: u8,
-        aot: AudioObjectType,
-    ) -> Result<(), TpDecoderError> {
-        if let Some(handle_rc) = &self.cb_data {
-            let mut handle_refcell = handle_rc.borrow_mut();
-            let handle = handle_refcell.deref_mut();
-
-            handle.uni_drc_parser(bs, payload_type, aot)
-        } else {
-            Err(TpDecoderError::UnknownError)
         }
     }
 

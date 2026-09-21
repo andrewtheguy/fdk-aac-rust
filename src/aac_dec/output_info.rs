@@ -93,12 +93,9 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! AAC decoder output information
 use super::ACFlags;
-use crate::{
-    aac_dec::drc::AacDrcPresentationMode,
-    common::{
-        aot::AudioObjectType, audio_channel_type::AudioChannelType,
-        bs_element_id::ChannelElementId, channel_order::ChannelOrder,
-    },
+use crate::common::{
+    aot::AudioObjectType, audio_channel_type::AudioChannelType, bs_element_id::ChannelElementId,
+    channel_order::ChannelOrder,
 };
 
 #[repr(C)]
@@ -124,65 +121,12 @@ pub struct OutputInfo {
     /// program_config_element().
     pub channel_indices: [u8; 8],
 
-    /// Audio output loudness in steps of -0.25 dB. Range: 0 (0 dBFS) to 231 (-57.75 dBFS).
-    /// A value of -1 indicates that no loudness metadata is present.
-    ///
-    /// If loudness normalization is active, the value corresponds to the target
-    /// loudness value set with `AAC_DRC_REFERENCE_LEVEL`.
-    ///
-    /// If loudness normalization is not active, the output loudness value
-    /// corresponds to the loudness metadata given in the bitstream.
-    /// Loudness metadata can originate from MPEG-4 DRC or MPEG-D DRC.
-    pub output_loudness: i16,
 }
 
 impl OutputInfo {
     /// Creates a new instance of `OutputInfo`, initialized with default values.
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct MetadataInfo {
-    /// DRC presentation mode. According to ETSI TS 101 154, this field indicates whether light
-    /// (MPEG-4 Dynamic Range Control tool) or heavy compression (DVB heavy compression) dynamic
-    /// range control shall take priority on the outputs.
-    pub drc_presentation_mode: AacDrcPresentationMode,
-
-    /// DRC program reference level. Defines the reference level below full-scale. It is
-    /// quantized in steps of 0.25dB. The valid values range from 0 (0 dBFS) to 127 (-31.75 dBFS).
-    /// It is used to reflect the average loudness of the audio in LKFS according to ITU-R BS
-    /// 1770. If no level has been found in the bitstream the value is -1.
-    pub drc_program_reference_level: i8,
-
-    /// The 2 bit matrix mixdown index extracted from PCE.
-    pub pce_matrix_mixdown_index: i8,
-
-    /// Pseudo Surround flag extracted from PCE.
-    pub pce_pseudo_surround_enable: bool,
-}
-
-impl Default for MetadataInfo {
-    fn default() -> Self {
-        Self {
-            // Set program reference level to not indicated.
-            drc_program_reference_level: -1,
-            // Presentation mode not present.
-            drc_presentation_mode: AacDrcPresentationMode::default(),
-            // Matrix mixdown index from PCE not indicated.
-            pce_matrix_mixdown_index: -1,
-            // Pseudo surround flag from PCE not indicated.
-            pce_pseudo_surround_enable: false,
-        }
-    }
-}
-
-impl MetadataInfo {
-    /// Creates a default instance of `MetadataInfo`.
-    pub fn new() -> Self {
-        Default::default()
     }
 }
 
@@ -268,8 +212,6 @@ impl StreamInfo {
 pub struct BitstreamInfo {
     /// Gives information about the currently decoded audio data.
     pub stream_info: Option<StreamInfo>,
-    /// Gives information about the metadata present for the currently decoded audio data.
-    pub metadata_info: Option<MetadataInfo>,
 }
 
 impl BitstreamInfo {
@@ -281,11 +223,6 @@ impl BitstreamInfo {
     /// Gets the stream information, if available.
     pub fn stream_info(&self) -> Option<StreamInfo> {
         self.stream_info
-    }
-
-    /// Gets the metadata information, if available.
-    pub fn metadata_info(&self) -> Option<MetadataInfo> {
-        self.metadata_info
     }
 
     /// Sets the stream information.
@@ -300,17 +237,6 @@ impl BitstreamInfo {
         }
     }
 
-    /// Sets the metadata information.
-    pub fn set_metadata_info(&mut self, mi: Option<MetadataInfo>) {
-        match mi {
-            Some(m) => {
-                self.metadata_info = Some(m);
-            }
-            None => {
-                self.metadata_info = None;
-            }
-        }
-    }
 }
 
 /// Describes the information of the current AAC frame.

@@ -95,7 +95,6 @@ amm-info@iis.fraunhofer.de
 
 // Modules
 pub mod aacdecoder;
-pub mod ancillary_data;
 pub mod block;
 pub mod callbacks;
 pub mod channel;
@@ -103,25 +102,19 @@ pub mod channel_info;
 pub mod conceal;
 pub mod config;
 pub mod constants;
-pub mod drc;
 pub mod error_codes;
-pub mod ext_data;
 pub mod hcr;
 pub mod huff_dec;
 pub mod intensity;
 pub mod interleaver;
 pub mod inverse_quantization;
-pub mod ipf;
-pub mod lpd;
 pub mod ms_stereo;
-pub mod noise_filling;
 pub mod output_info;
 pub mod params;
 pub mod pns;
 pub mod process;
 pub mod pulse_data;
 pub mod rvlc;
-pub mod signal_delay;
 pub mod sr_info;
 pub mod tns;
 pub mod utils;
@@ -129,26 +122,20 @@ pub mod utils;
 // Re-exports
 pub use crate::{
     aac_dec::{
-        conceal::ConcealmentMethod,
         constants::MAX_CHANNELS,
-        drc::{AacDrcParameterHandling, AacDrcPresentationMode},
         error_codes::AacDecoderError,
-        ext_data::MAX_ANC_ELEMENTS,
-        output_info::{BitstreamInfo, DecoderInfo, MetadataInfo, OutputInfo, StreamInfo},
-        params::{AacMdProfile, LimiterMode, Param},
+        output_info::{BitstreamInfo, DecoderInfo, OutputInfo, StreamInfo},
     },
     common::{
         aot::AudioObjectType, audio_channel_type::AudioChannelType,
         bs_element_id::ChannelElementId, channel_order::ChannelOrder, flags::ACFlags,
     },
-    drc_dec::DrcEffectTypeRequest,
-    pcm_dmx::DualChannelMode,
     tp_dec::{MAX_CONF_SIZE, TRANSPORTDEC_INBUF_SIZE},
 };
 
 // Imports
 use crate::{
-    aac_dec::{aacdecoder::AacDecoder, conceal::A_CONCEAL_AU, ipf::IpfData, params::Params},
+    aac_dec::{aacdecoder::AacDecoder, conceal::A_CONCEAL_AU, params::Params},
     common::{bitstream::Bitstream, flags::AACDecFlags},
     tp_dec::{callbacks::TpDecCb, TransportDec},
 };
@@ -164,11 +151,14 @@ pub struct AacDecoderInstance {
     /// AAC decoder handle.
     aac_decoder: Rc<RefCell<AacDecoder>>,
 
-    /// Immediate Playout Frame (IPF) data.
-    ipf_data: Option<Box<IpfData>>,
-
     /// Transport decoder handle.
     transport_decoder: Box<TransportDec>,
+}
+
+impl Default for AacDecoderInstance {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AacDecoderInstance {
@@ -178,7 +168,6 @@ impl AacDecoderInstance {
             params: Params::new(),
             aac_decoder: Rc::new(RefCell::new(AacDecoder::new())),
             transport_decoder: Box::new(TransportDec::new()),
-            ipf_data: None,
         };
 
         aac_decoder_instance.transport_decoder.init();
@@ -193,39 +182,6 @@ impl AacDecoderInstance {
         let aac_dec_clone = self.aac_decoder.clone() as Rc<RefCell<dyn TpDecCb>>;
         let cb = self.transport_decoder.callback();
         cb.register_callback_data(Some(aac_dec_clone));
-    }
-
-    /// Reads one ancillary data element into the provided buffer.
-    ///
-    /// # Parameters
-    ///
-    /// - `index`: Index value of ancillary data.
-    /// - `buffer`: Buffer receiving the requested ancillary data.
-    ///
-    /// # Return
-    ///
-    /// - `Result<usize, AacDecoderError>`
-    ///    - `Ok(usize)` if success, number of bytes written to buffer.
-    ///    - `AacDecoderError` in case of error.
-    pub fn anc_data(&mut self, index: usize, buffer: &mut [u8]) -> Result<usize, AacDecoderError> {
-        let mut refcell_aac_dec = self.aac_decoder.borrow_mut();
-        let aac_dec = refcell_aac_dec.deref_mut();
-
-        let ext_data = &mut aac_dec.extension_data;
-        if ext_data.ancillary_data.is_empty() {
-            return Ok(0);
-        }
-
-        if index > (ext_data.ancillary_data.len()).min(ext_data.ancillary_data.capacity()) {
-            return Err(AacDecoderError::AncDataError);
-        }
-
-        if let Some(anc_data) = ext_data.ancillary_data_mut(index) {
-            let bs = self.transport_decoder.bs_mut();
-            anc_data.read(bs, buffer)
-        } else {
-            Ok(0)
-        }
     }
 
     /// Decodes an `AAC` frame. The decoded output signal is stored in `time_data`.
@@ -274,35 +230,10 @@ impl AacDecoderInstance {
                 }
             }
 
-            let is_ipf_possible = {
-                let mut refcell_aac_dec = self.aac_decoder.borrow_mut();
-                let aac_dec = refcell_aac_dec.deref_mut();
-                aac_dec.is_ipf_possible()
-            };
-
-            // Allocate ipf module if immediate playout frame supported in decoder configuration.
-            if is_ipf_possible && self.ipf_data.is_none() && error_status == AacDecoderError::Ok {
-                self.ipf_data = Some(Box::new(IpfData::new()));
-            }
-
-            if error_status == AacDecoderError::TransportSyncError {
-                let mut refcell_aac_dec = self.aac_decoder.borrow_mut();
-                let aac_dec = refcell_aac_dec.deref_mut();
-
-                // Signal bitstream discontinuity.
-                aac_dec.signal_interruption(false);
-            } else if error_status == AacDecoderError::Ok {
-                let mut ipf_data = if is_ipf_possible {
-                    self.ipf_data.as_deref_mut()
-                } else {
-                    None
-                };
-
+            if error_status == AacDecoderError::Ok {
                 // Decode bistream
-                match AacDecoder::process(
-                    self.aac_decoder.clone(),
-                    &mut ipf_data,
-                    &mut Some(&mut self.transport_decoder),
+                match self.aac_decoder.borrow_mut().process(
+                    Some(&mut self.transport_decoder),
                     time_data,
                     &mut self.params,
                     AACDecFlags::empty(),
@@ -324,12 +255,7 @@ impl AacDecoderInstance {
 
         // Create `BitstreamInfo`, with valid internal data.
         let bs_info = BitstreamInfo {
-            stream_info: aac_dec.stream_info(
-                &mut self.transport_decoder,
-                bs_anchor,
-                error_status == AacDecoderError::Ok,
-            ),
-            metadata_info: aac_dec.metadata_info(),
+            stream_info: aac_dec.stream_info(&mut self.transport_decoder, bs_anchor),
         };
 
         if error_status == AacDecoderError::Ok {
@@ -370,21 +296,6 @@ impl AacDecoderInstance {
             Ok(valid_bytes) => Ok(valid_bytes),
             Err((_remain_bytes, e)) => Err(e.into()),
         }
-    }
-
-    /// Signals an input bit stream data discontinuity.
-    /// Resyncs any internals as necessary. Clears all signal delay lines and history
-    /// buffers. This can cause discontinuities in the output signal.
-    ///
-    /// # Return
-    ///
-    /// - `Result<(), AacDecoderError>`.
-    pub fn interrupt(&mut self) -> Result<(), AacDecoderError> {
-        let mut refcell_aac_dec = self.aac_decoder.borrow_mut();
-        let aac_decoder = refcell_aac_dec.deref_mut();
-        aac_decoder.signal_interruption(true);
-        self.params.restore();
-        Ok(())
     }
 
     /// Clears internal bit stream buffer of transport layers.
@@ -437,19 +348,6 @@ impl AacDecoderInstance {
             .map_err(|e| e.into())
     }
 
-    /// Sets one single decoder parameter.
-    ///
-    /// # Parameters
-    ///
-    /// - `param`: Parameter type to be set.
-    ///
-    /// # Return
-    ///
-    /// - `Result<(), AacDecoderError>`.
-    pub fn set_param(&mut self, param: Param) -> Result<(), AacDecoderError> {
-        self.params.set_param(param)
-    }
-
     /// Flushes all filterbanks to get all delayed audio without having new input
     /// data. New input data will not be considered.
     ///
@@ -468,14 +366,9 @@ impl AacDecoderInstance {
             return Err((e, OutputInfo::default()));
         }
 
-        AacDecoder::process(
-            self.aac_decoder.clone(),
-            &mut None,
-            &mut None,
-            time_data,
-            &mut self.params,
-            AACDecFlags::FLUSH,
-        )
+        self.aac_decoder
+            .borrow_mut()
+            .process(None, time_data, &mut self.params, AACDecFlags::FLUSH)
     }
 
     /// Triggers the built-in error concealment to generate substitute signal for
@@ -492,14 +385,9 @@ impl AacDecoderInstance {
         &mut self,
         time_data: &mut [f32],
     ) -> Result<OutputInfo, (AacDecoderError, OutputInfo)> {
-        AacDecoder::process(
-            self.aac_decoder.clone(),
-            &mut None,
-            &mut None,
-            time_data,
-            &mut self.params,
-            AACDecFlags::CONCEAL,
-        )
+        self.aac_decoder
+            .borrow_mut()
+            .process(None, time_data, &mut self.params, AACDecFlags::CONCEAL)
     }
 }
 
@@ -507,7 +395,6 @@ impl Drop for AacDecoderInstance {
     /// De-initializes the internal heap memory.
     fn drop(&mut self) {
         self.transport_decoder.data.deinit();
-        self.ipf_data = None;
 
         {
             let mut refcell_aac_dec = self.aac_decoder.borrow_mut();

@@ -124,7 +124,6 @@ pub enum AacDecoderRenderMode {
     Invalid = 0,
     Imdct,
     EldFb,
-    Lpd,
 }
 
 // Converts i8 to AacDecoderRenderMode.
@@ -134,7 +133,6 @@ impl From<i8> for AacDecoderRenderMode {
             0 => AacDecoderRenderMode::Invalid,
             1 => AacDecoderRenderMode::Imdct,
             2 => AacDecoderRenderMode::EldFb,
-            3 => AacDecoderRenderMode::Lpd,
             _ => AacDecoderRenderMode::Invalid,
         }
     }
@@ -149,7 +147,6 @@ impl TryFrom<AacDecoderRenderMode> for i8 {
             AacDecoderRenderMode::Invalid => Ok(0),
             AacDecoderRenderMode::Imdct => Ok(1),
             AacDecoderRenderMode::EldFb => Ok(2),
-            AacDecoderRenderMode::Lpd => Ok(3),
             // _ => Err("invalid AacDecoderRenderMode value."),
         }
     }

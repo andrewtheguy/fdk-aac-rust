@@ -137,31 +137,9 @@ pub(super) fn get_sample_rate(bs: &mut Bitstream, index: Option<&mut u8>, n_bits
     sample_rate
 }
 
-/// Skips SBR header.
-///
-/// # Parameters
-///
-/// - `bs`: Bitstream instance with valid internal data.
-/// - `is_usac`: `true` if is `USAC`, Otherwise `false`.
-pub(super) fn skip_sbr_header(bs: &mut Bitstream, is_usac: bool) {
-    if !is_usac {
-        // Amp res 1, xover freq 3, reserved 2.
-        bs.push(6);
-    }
-    // start / stop freq.
-    bs.push(8);
-
-    // Parse SBR default header.
-    let dflt_header_extra_1 = bs.read_bit();
-    let dflt_header_extra_2 = bs.read_bit();
-    let num_bits = ((5 * dflt_header_extra_1) + (6 * dflt_header_extra_2)) as isize;
-    bs.push(num_bits);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::bs_element_id::ChannelElementId;
     use crate::common::bitstream::Mode;
 
     #[test]
@@ -186,22 +164,4 @@ mod tests {
         assert_eq!(sample_rate, 96000);
     }
 
-    #[test]
-    fn test_is_channel_ele() {
-        assert!(ChannelElementId::Sce.is_channel_element());
-        assert!(ChannelElementId::Cpe.is_channel_element());
-        assert!(ChannelElementId::Lfe.is_channel_element());
-        assert!(ChannelElementId::UsacSce.is_channel_element());
-        assert!(ChannelElementId::UsacCpe.is_channel_element());
-        assert!(ChannelElementId::UsacLfe.is_channel_element());
-
-        assert!(!ChannelElementId::Cce.is_channel_element());
-        assert!(!ChannelElementId::Dse.is_channel_element());
-        assert!(!ChannelElementId::Pce.is_channel_element());
-        assert!(!ChannelElementId::Fil.is_channel_element());
-        assert!(!ChannelElementId::End.is_channel_element());
-        assert!(!ChannelElementId::Ext.is_channel_element());
-        assert!(!ChannelElementId::UsacExt.is_channel_element());
-        assert!(!ChannelElementId::Last.is_channel_element());
-    }
 }

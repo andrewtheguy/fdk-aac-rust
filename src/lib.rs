@@ -98,19 +98,7 @@ amm-info@iis.fraunhofer.de
 
 #[cfg(feature = "aac_dec")]
 pub mod aac_dec;
-#[cfg(feature = "aac_dec")]
-pub mod arith_coding;
 pub mod common;
-#[cfg(feature = "aac_dec")]
-pub mod drc_dec;
-#[cfg(feature = "aac_dec")]
-pub mod pcm_dmx;
-#[cfg(feature = "aac_dec")]
-pub mod sac_dec;
-#[cfg(feature = "aac_dec")]
-pub mod sbr_dec;
-#[cfg(feature = "aac_dec")]
-pub mod td_limiter;
 #[cfg(feature = "aac_dec")]
 pub mod tp_dec;
 
