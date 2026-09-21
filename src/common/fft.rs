@@ -112,14 +112,12 @@ const N3: usize = 3;
 const N5: usize = 5;
 const N15: usize = 15;
 
-const FC30: f32 = 0.5000000;
 const FC31: f32 = -0.86602540;
 const FC51: f32 = 0.95105652;
 const FC52: f32 = -1.53884180;
 const FC53: f32 = -0.36327126;
 const FC54: f32 = 0.55901699;
 const FC55: f32 = -1.25;
-const FC61: f32 = 0.86602540;
 
 #[inline]
 fn sumdiff_pi_fourth(a: &Complex<f32>) -> Complex<f32> {
@@ -128,62 +126,6 @@ fn sumdiff_pi_fourth(a: &Complex<f32>) -> Complex<f32> {
         re: (w.im - w.re),
         im: (w.im + w.re),
     }
-}
-
-/// Perform an inplace complex valued FFT of length 2
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline(always)]
-fn fft_2(data: &mut [Complex<f32>]) {
-    let tmp = data[0] + data[1];
-
-    data[1] = data[0] - data[1];
-    data[0] = tmp;
-}
-
-/// Perform an inplace complex valued FFT of length 3 according to the algorithm after winograd.
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline(always)]
-fn fft_3(data: &mut [Complex<f32>]) {
-    let mut c1 = data[1] + data[2];
-    let c2 = (data[1] - data[2]) * FC31;
-    let d = data[0];
-    data[0] = d + c1;
-    c1 = d - (c1 * FC30);
-
-    // combination
-    data[1].re = c1.re - c2.im;
-    data[1].im = c1.im + c2.re;
-
-    data[2].re = c1.re + c2.im;
-    data[2].im = c1.im - c2.re;
-}
-
-/// Perform an inplace complex valued FFT of length 4
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline(always)]
-fn fft_4(data: &mut [Complex<f32>]) {
-    let a0 = data[0] + data[2]; // A + C
-    let mut a1 = data[1] + data[3]; // B + D
-    let tmp = data[0] - data[2]; // A - C
-
-    data[0] = a0 + a1; // A' = A + B + C + D
-    data[2] = a0 - a1; // C' = (A + C) - (B + D)
-
-    a1 -= data[3] * 2.0; // B - D
-
-    data[1].re = tmp.re + a1.im; // Re B' = Re A - Re C + Im B - Im D
-    data[1].im = tmp.im - a1.re; // Im B' = Im A - Im C - Re B + Re D
-    data[3].re = tmp.re - a1.im; // Re D' = Re A - Re C - Im B + Im D
-    data[3].im = tmp.im + a1.re; // Im D' = Im A - Im C + Re B - Re D
 }
 
 /// Perform an inplace complex valued FFT of length 5 according to the algorithm after winograd.
@@ -221,338 +163,6 @@ fn fft_5(data: &mut [Complex<f32>]) {
     data[4].im = c1.im + c2.re;
     data[2].im = c3.im + c4.re;
     data[3].im = c3.im - c4.re;
-}
-
-/// Perform an inplace complex valued FFT of length 6
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline(always)]
-fn fft_6(data: &mut [Complex<f32>]) {
-    let (c0, c1, c2, c3, c4, c5);
-    let (i1e, i2e);
-
-    c0 = data[0];
-    c1 = data[1];
-    c2 = data[2];
-    c3 = data[3];
-    c4 = data[4];
-    c5 = data[5];
-
-    let mut t = c0 + (c2 + c4);
-    let mut s = c1 + (c3 + c5);
-
-    data[0] = t + s;
-    data[3] = t - s;
-
-    t = c0 - ((c4 + c2) / 2.0);
-    s.re = (c4.im - c2.im) * FC61;
-    s.im = (c4.re - c2.re) * FC61;
-
-    data[4].re = t.re - s.re;
-    i1e = t.im + s.im;
-    data[5].re = t.re + s.re;
-    i2e = t.im - s.im;
-
-    t = c1 - ((c5 + c3) / 2.0);
-    s = (c5 - c3) * FC61;
-
-    let (r1o, i1o) = (t.re - s.im, t.im + s.re);
-    let (r2o, i2o) = (t.re + s.im, t.im - s.re);
-
-    let mut rr = (r1o / 2.0) + i1o * FC61;
-    let mut ss = (i1o / 2.0) - r1o * FC61;
-
-    data[1].re = data[4].re + rr;
-    data[1].im = i1e + ss;
-    data[4].re -= rr;
-    data[4].im = i1e - ss;
-
-    rr = i2o * FC61 - (r2o / 2.0);
-    ss = r2o * FC61 + (i2o / 2.0);
-
-    data[2].re = data[5].re + rr;
-    data[2].im = i2e - ss;
-    data[5].re -= rr;
-    data[5].im = i2e + ss;
-}
-
-/// Perform an inplace complex valued FFT of length 8
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline(always)]
-fn fft_8(data: &mut [Complex<f32>]) {
-    let mut y = [Complex { re: 0.0, im: 0.0 }; 8];
-
-    let mut a1 = data[0] + data[4];
-    let mut a2 = data[2] + data[6];
-
-    y[0] = a1 + a2;
-    y[2] = a1 - a2;
-
-    a1 = data[0] - data[4];
-    a2 = data[2] - data[6];
-
-    y[1].re = a1.re + a2.im;
-    y[1].im = a1.im - a2.re;
-    y[3].re = a1.re - a2.im;
-    y[3].im = a1.im + a2.re;
-
-    a1 = data[1] + data[5];
-    a2 = data[3] + data[7];
-
-    y[4] = a1 + a2;
-    y[6] = a1 - a2;
-
-    a1 = data[1] - data[5];
-    a2 = data[3] - data[7];
-
-    y[5].re = a1.re + a2.im;
-    y[5].im = a1.im - a2.re;
-    y[7].re = a1.re - a2.im;
-    y[7].im = a1.im + a2.re;
-
-    let mut u = y[0];
-    let mut v = y[4];
-    data[0] = u + v;
-    data[4] = u - v;
-
-    u = y[2];
-    v.re = y[6].im;
-    v.im = y[6].re;
-
-    data[2] = u + v.conj();
-    data[6] = u - v.conj();
-
-    v = y[5] * fft_tables::W_PI_FOURTH_TAB[0].conj();
-
-    u = y[1];
-    data[1] = u + v;
-    data[5] = u - v;
-
-    u.re = y[7].im;
-    u.im = y[7].re;
-
-    v = u * fft_tables::W_PI_FOURTH_TAB[0];
-
-    u = y[3];
-    data[3] = u + v.conj();
-    data[7] = u - v.conj();
-}
-
-/// Perform an inplace complex valued FFT of length 10
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline]
-fn fft_10(data: &mut [Complex<f32>]) {
-    let (y0, y1, y2, y3, y4, y5, y6, y7, y8, y9);
-    let (mut a0, mut a1, mut a2, mut a3, mut a4);
-    let (mut c1, mut c2, mut c3, mut c4, mut ct);
-
-    // 2 fft5 stages
-
-    a0 = data[0];
-    a1 = data[2];
-    a2 = data[4];
-    a3 = data[6];
-    a4 = data[8];
-
-    c1 = a3 + a2;
-    c4 = a3 - a2;
-    c3 = a1 + a4;
-    c2 = a1 - a4;
-    ct = (c1 - c3) * FC54;
-    c1 += c3;
-
-    y0 = a0 + c1;
-
-    c1 = y0 + (c1 * FC55);
-    c3 = c1 - ct;
-    c1 += ct;
-    ct = (c4 + c2) * FC51;
-    c4 = ct + (c4 * FC52);
-    c2 = ct + (c2 * FC53);
-
-    // combination
-    y2 = Complex {
-        re: (c1.re + c2.im),
-        im: (c1.im - c2.re),
-    };
-    y4 = Complex {
-        re: (c3.re - c4.im),
-        im: (c3.im + c4.re),
-    };
-    y6 = Complex {
-        re: (c3.re + c4.im),
-        im: (c3.im - c4.re),
-    };
-    y8 = Complex {
-        re: (c1.re - c2.im),
-        im: (c1.im + c2.re),
-    };
-
-    a0 = data[5];
-    a1 = data[1];
-    a2 = data[3];
-    a3 = data[7];
-    a4 = data[9];
-
-    c1 = a1 + a4;
-    c4 = a1 - a4;
-    c3 = a3 + a2;
-    c2 = a3 - a2;
-    ct = (c1 - c3) * FC54;
-    c1 += c3;
-
-    y1 = a0 + c1;
-
-    c1 = y1 + (c1 * FC55);
-    c3 = c1 - ct;
-    c1 += ct;
-    ct = (c4 + c2) * FC51;
-    c4 = ct + (c4 * FC52);
-    c2 = ct + (c2 * FC53);
-
-    // combination
-    y3 = Complex {
-        re: (c1.re + c2.im),
-        im: (c1.im - c2.re),
-    };
-    y5 = Complex {
-        re: (c3.re - c4.im),
-        im: (c3.im + c4.re),
-    };
-    y7 = Complex {
-        re: (c3.re + c4.im),
-        im: (c3.im - c4.re),
-    };
-    y9 = Complex {
-        re: (c1.re - c2.im),
-        im: (c1.im + c2.re),
-    };
-
-    // 5 fft2 stages
-    data[0] = y0 + y1;
-    data[5] = y0 - y1;
-    data[2] = y2 + y3;
-    data[7] = y2 - y3;
-    data[4] = y4 + y5;
-    data[9] = y4 - y5;
-    data[6] = y6 + y7;
-    data[1] = y6 - y7;
-    data[8] = y8 + y9;
-    data[3] = y8 - y9;
-}
-
-/// Perform an inplace complex valued FFT of length 12
-///
-/// # Parameters
-///
-/// - `data`: Input/Output data buffer.
-#[inline]
-fn fft_12(data: &mut [Complex<f32>]) {
-    let mut work_buff: ArrayVec<Complex<f32>, 12> = ArrayVec::new();
-
-    let (mut c1, mut c2, mut d);
-    let mut cnt = 0;
-
-    let src: &[Complex<f32>] = data;
-
-    c1 = src[cnt + 4] + src[cnt + 8];
-    c2 = (src[cnt + 4] - src[cnt + 8]) * FC31;
-    d = src[cnt];
-
-    work_buff.push(d + c1);
-
-    c1 = d - (c1 * 0.5);
-
-    // combination
-    work_buff.push(Complex {
-        re: c1.re - c2.im,
-        im: c1.im + c2.re,
-    });
-    work_buff.push(Complex {
-        re: c1.re + c2.im,
-        im: c1.im - c2.re,
-    });
-
-    cnt += 1;
-
-    let mut rot_vec_item = fft_tables::ROT_VECTOR_12.iter();
-    for _i in 0..2 {
-        c1 = src[cnt + 4] + src[cnt + 8];
-        c2 = (src[cnt + 4] - src[cnt + 8]) * FC31;
-        d = src[cnt];
-
-        work_buff.push(d + c1);
-
-        c1 = d - (c1 * 0.5);
-
-        // combination
-        work_buff.push(
-            Complex {
-                re: (c1.re - c2.im),
-                im: (c1.im + c2.re),
-            } * rot_vec_item.next().unwrap().conj(),
-        );
-        work_buff.push(
-            Complex {
-                re: (c1.re + c2.im),
-                im: (c1.im - c2.re),
-            } * rot_vec_item.next().unwrap().conj(),
-        );
-
-        cnt += 1;
-    }
-    // sample 2,3 is complex multiplied with (0.0,1.0)
-    // sample 4,5 is complex multiplied with (-1.0,0.0)
-
-    c1 = src[cnt + 4] + src[cnt + 8];
-    c2 = (src[cnt + 4] - src[cnt + 8]) * FC31;
-    d = src[cnt];
-
-    work_buff.push(d + c1);
-
-    c1 = d - (c1 * 0.5);
-
-    // combination
-    work_buff.push(Complex {
-        re: c1.im + c2.re,
-        im: c2.im - c1.re,
-    });
-    work_buff.push(Complex {
-        re: -(c1.re + c2.im),
-        im: c2.re - c1.im,
-    });
-
-    // Perform 3 times the fft of length 4. The input samples are at the address
-    // of work_buff and the output samples are at the address of data.
-    let src = &work_buff[..];
-    let dest = data;
-
-    for cnt in 0..3 {
-        // inline FFT4 merged with incoming resorting loop
-        let (a0, mut a1, tmp);
-
-        a0 = src[cnt] + src[cnt + 6]; // A + B
-        a1 = src[cnt + 3] + src[cnt + 9]; // C + D
-
-        dest[cnt] = a0 + a1; // A' = (A + B) + (C + D)
-        dest[cnt + 6] = a0 - a1; // C' = (A + B) - (C + D)
-
-        a1 = src[cnt + 3] - src[cnt + 9]; // C - D
-        tmp = src[cnt] - src[cnt + 6]; // A - B
-
-        dest[cnt + 3].re = tmp.re + a1.im; // Re B' = Re A - Re B + Im C - Im D
-        dest[cnt + 3].im = tmp.im - a1.re; // Im B' = Im A - Im B - Re C + Re D
-        dest[cnt + 9].re = tmp.re - a1.im; // Re D' = Re A - Re B - Im C + Im D
-        dest[cnt + 9].im = tmp.im + a1.re; // Im D' = Im A - Im B + Re C - Re D
-    }
 }
 
 /// Perform an inplace complex valued FFT of length 15. It is split into FFTs of length 3 and length
@@ -862,69 +472,21 @@ fn fft_16(data: &mut [Complex<f32>]) {
     data[15].im = u.im + v.im;
 }
 
-fft_n2!(20, 4, 5);
-fft_n2!(24, 2, 12);
-dit_fft!(32, 32);
-fft_n2!(48, 4, 12);
-fft_n2!(60, 4, 15);
-dit_fft!(64, 512);
-fft_n2!(80, 5, 16);
-fft_n2!(96, 3, 32);
-fft_n2!(120, 8, 15);
-dit_fft!(128, 512);
-fft_n2!(192, 16, 12);
 fft_n2!(240, 16, 15);
 dit_fft!(256, 512);
-fft_n2!(384, 12, 32);
-fft_n2!(480, 32, 15);
-dit_fft!(512, 512);
+
+/// The longest FFT `fft` performs.
+pub const MAX_FFT_LENGTH: usize = 256;
 
 /// Perform an inplace complex valued FFT of length `data.len()`
 ///
 /// # Parameters
 ///
 /// - `data`: Input/Output data buffer.
-///
-/// # Examples
-/// ```
-/// use aac::common::fft;
-/// use num_complex::Complex;
-///
-/// const N: usize = 4;
-/// let mut data: [Complex<f32>; N] = [Complex { re: 1.0, im: 0.0 }; N];
-///
-/// fft::fft(&mut data); // will perform fft_4()
-///
-/// assert!(data[0] == Complex { re: 4.0, im: 0.0 });
-/// ```
 pub fn fft(data: &mut [Complex<f32>]) {
     match data.len() {
-        2 => fft_2(data),
-        3 => fft_3(data),
-        4 => fft_4(data),
-        5 => fft_5(data),
-        6 => fft_6(data),
-        8 => fft_8(data),
-        10 => fft_10(data),
-        12 => fft_12(data),
-        15 => fft_15(data),
-        16 => fft_16(data),
-        20 => fft_20(data),
-        24 => fft_24(data),
-        32 => fft_32(data),
-        48 => fft_48(data),
-        60 => fft_60(data),
-        64 => fft_64(data),
-        80 => fft_80(data),
-        96 => fft_96(data),
-        120 => fft_120(data),
-        128 => fft_128(data),
-        192 => fft_192(data),
         240 => fft_240(data),
         256 => fft_256(data),
-        384 => fft_384(data),
-        480 => fft_480(data),
-        512 => fft_512(data),
         _ => panic!("FFT length {} not supported!", data.len()),
     }
 }

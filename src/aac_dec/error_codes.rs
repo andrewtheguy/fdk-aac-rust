@@ -92,9 +92,7 @@ www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! AAC decoder interface
-use crate::td_limiter::limiter::TdLimiterError;
-
-use crate::{pcm_dmx::PcmDmxError, tp_dec::TpDecoderError};
+use crate::tp_dec::TpDecoderError;
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug, PartialOrd)]
@@ -185,17 +183,6 @@ impl AacDecoderError {
     }
 }
 
-impl From<TdLimiterError> for AacDecoderError {
-    fn from(error: TdLimiterError) -> Self {
-        match error {
-            TdLimiterError::Ok => AacDecoderError::Ok,
-            TdLimiterError::Unknown => AacDecoderError::Unknown,
-            TdLimiterError::InvalidHandle => AacDecoderError::InvalidHandle,
-            TdLimiterError::InvalidParameter => AacDecoderError::SetParamFail,
-        }
-    }
-}
-
 pub trait Cluster {
     fn is_output_valid(&self) -> bool;
 }
@@ -205,28 +192,6 @@ impl Cluster for Result<(), AacDecoderError> {
         match self {
             Ok(()) => true,
             Err(error) => error.is_output_valid(),
-        }
-    }
-}
-
-/// Error mapping from `PcmDmxError` to `AacDecoderError`
-impl From<PcmDmxError> for AacDecoderError {
-    fn from(pcm_dmx_error: PcmDmxError) -> Self {
-        match pcm_dmx_error {
-            PcmDmxError::Ok => Self::Ok,
-            PcmDmxError::OutputBufferTooSmall => Self::OutputBufferTooSmall,
-            PcmDmxError::_OutOfMemory => Self::OutOfMemory,
-            PcmDmxError::InvalidHandle => Self::InvalidHandle,
-            PcmDmxError::InvalidArgument => Self::DecodeFrameError,
-            PcmDmxError::InvalidChConfig => Self::DecodeFrameError,
-            PcmDmxError::InvalidMode => Self::DecodeFrameError,
-            PcmDmxError::_UnknownParam => Self::Unknown,
-            PcmDmxError::UnableToSetParam => Self::SetParamFail,
-            PcmDmxError::CorruptAncData => Self::AncDataError,
-            PcmDmxError::Unsupported => Self::DecodeFrameError,
-            PcmDmxError::_FatalErrorStart | PcmDmxError::_FatalErrorEnd => {
-                panic!("Error invalid !")
-            }
         }
     }
 }

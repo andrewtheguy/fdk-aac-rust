@@ -93,10 +93,10 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! AAC core concealment interface
 
-use super::conceal_constants::{AacDecoderRenderMode, ConcealmentState};
+use super::conceal_constants::AacDecoderRenderMode;
 use super::conceal_info::ConcealmentInfo;
-use super::conceal_params::{ConcealmentMethod, ConcealmentParams};
-use crate::aac_dec::{channel_info::IcsInfo, lpd::LpdData, sr_info::SamplingRateInfo};
+use super::conceal_params::ConcealmentParams;
+use crate::aac_dec::channel_info::IcsInfo;
 use crate::common::flags::ACFlags;
 
 /// Concealment data
@@ -109,13 +109,6 @@ pub struct ConcealmentData {
 }
 
 impl ConcealmentData {
-    /// Creates new ConcealmentData instance.
-    pub fn new(num_channels: usize) -> Self {
-        ConcealmentData {
-            conceal_info: vec![ConcealmentInfo::new(); num_channels],
-            ..Default::default()
-        }
-    }
 
     /// Initializes concealment data with default values
     /// for a given number of channels.
@@ -135,54 +128,21 @@ impl ConcealmentData {
 
     /// This function applies different concealment techniques (Muting, Noise substitution,
     /// Interpolation) on the specific channel spectral data, based on current and previous
-    /// frame spectral coefficients. Also `LpdData` should be available in case of `AC_USAC`
-    /// audiocodec flag is active.
+    /// frame spectral coefficients.
     ///
     /// # Parameters
     ///
-    /// - `lpd_data`: LpdData instance with valid internal data
     /// - `ics_info`: Individual channel stream info with valid internal data
-    /// - `sr_info`: Sampling rate info instance with valid data
     /// - `spectral_coefficient`: Spectral coefficients of current frame
     /// - `spectral_coefficient_prev`: Spectral coefficients of previous frame
     /// - `render_mode`: Type of AAC decoder's render mode (AacdecRenderMode)
     /// - `channel`: Channel to be concealed
     /// - `ac_flags`: Scalefactors for each band in each window
     /// - `is_frame_ok`: Flag indicates whether current frame is Ok (or) defective
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::{conceal::{ConcealmentData, AacDecoderRenderMode}, lpd::LpdData,
-    /// channel_info::IcsInfo, sr_info::SamplingRateInfo};
-    /// use aac::common::flags::{ACFlags, self};
-    ///
-    /// // Precondition, should have a valid data with all instances.
-    /// // Refer ConcelmentData, IcsInfo, LpdData, SamplingRateInfo
-    /// // components for instance creation, other methods of it.
-    /// let mut ics_info = IcsInfo::new();
-    /// let sr_info = SamplingRateInfo::new();
-    /// let sampling_rate = 24000;
-    /// let mut lpd_data = LpdData::new(sampling_rate);
-    ///
-    /// let num_channels = 2;
-    /// let mut conceal_data = ConcealmentData::new(num_channels);
-    ///
-    /// let mut spectrum = vec![0.0_f32; 1024];
-    /// let mut spectrum_prev = vec![0.0_f32; 1024];
-    /// let mut render_mode =AacDecoderRenderMode::Lpd;
-    /// let channel = 1;
-    /// let ac_flags = ACFlags::USAC;
-    /// let is_frame_ok = false;
-    ///
-    /// conceal_data.apply(Some(&mut lpd_data), &mut ics_info, &sr_info, &mut spectrum,
-    ///          &mut spectrum_prev, &mut render_mode, channel, ac_flags, is_frame_ok)
     #[expect(clippy::too_many_arguments)]
     pub fn apply(
         &mut self,
-        lpd_data: Option<&mut LpdData>,
         ics_info: &mut IcsInfo,
-        sr_info: &SamplingRateInfo,
         spectral_coefficient: &mut [f32],
         spectral_coefficient_prev: &mut [f32],
         render_mode: &mut AacDecoderRenderMode,
@@ -192,74 +152,13 @@ impl ConcealmentData {
     ) {
         self.conceal_info[channel].apply(
             &self.params,
-            lpd_data,
             ics_info,
-            sr_info,
             spectral_coefficient,
             spectral_coefficient_prev,
             render_mode,
             ac_flags,
             is_frame_ok,
         );
-    }
-
-    /// Returns the number of delay frames introduced by concealment technique.
-    pub fn delay(&self) -> u8 {
-        if self.params.method == ConcealmentMethod::Inter {
-            1
-        } else {
-            0
-        }
-    }
-
-    /// Returns flag status of mute release for given channel in concealment.
-    pub fn is_mute_release(&self, channel: usize) -> bool {
-        self.conceal_info[channel].is_mute_release
-    }
-
-    /// Updates concealment data based on given concealment
-    /// parameters and audio codec flags.
-    ///
-    ///  # Parameters
-    ///
-    /// - `params`: ConcealmentParams instance with valid internal data
-    /// - `ac_flags`: Audio codec
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::conceal::{ConcealmentData, ConcealmentParams};
-    /// use aac::common::flags::{ACFlags, self};
-    ///
-    /// // Precondition, should have a valid data with instances.
-    /// // Refer ConcelmentData, ConcealmentParams and it's methods.
-    ///
-    /// let num_channels = 2;
-    /// let mut conceal_data = ConcealmentData::new(num_channels);
-    /// let mut params = ConcealmentParams::new();
-    ///
-    /// let ac_flags = ACFlags::USAC;
-    /// conceal_data.params_update(&mut params, ac_flags);
-    pub fn params_update(&mut self, params: &mut ConcealmentParams, ac_flags: ACFlags) {
-        if params.has_changed {
-            params.has_changed = false;
-            self.params.clone_from(params);
-
-            let method = params.method;
-
-            if ac_flags.intersects(ACFlags::USAC | ACFlags::LD | ACFlags::ELD | ACFlags::MPEG4_ESBR)
-            {
-                if method >= ConcealmentMethod::Inter || method == ConcealmentMethod::None {
-                    self.params.method = ConcealmentMethod::Noise;
-                }
-            } else {
-                self.params.method = if method == ConcealmentMethod::None {
-                    ConcealmentMethod::Inter
-                } else {
-                    method
-                };
-            }
-        }
     }
 
     /// Returns status of last frame in concealment.
@@ -295,31 +194,11 @@ impl ConcealmentData {
     ///
     /// - `pcm_data`: PCM data to be faded
     /// - `channel`: Index of the channel
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use aac::aac_dec::conceal::{ConcealmentData, ConcealmentParams};
-    /// use aac::common::flags;
-    ///
-    /// // Precondition, should have a valid instance with data.
-    /// // Refer `ConcelmentData` and its methods.
-    ///
-    /// let num_channels = 2;
-    /// let mut conceal_data = ConcealmentData::new(num_channels);
-    /// let mut pcm = vec![0.0_f32;1024];
-    /// let channel = 1;
-    /// conceal_data.timedomain_fading(&mut pcm, channel);
     pub fn timedomain_fading(&mut self, pcm_data: &mut [f32], channel: usize) {
         // noise seed update
         ConcealmentInfo::timedomain_noise_random(&mut self.td_noise_seed);
         self.td_noise_seed += 1;
         self.conceal_info[channel].timedomain_fading(&self.params, self.td_noise_seed, pcm_data);
-    }
-
-    /// Returns concealment state of given channel.
-    pub fn channel_concealstate(&self, channel: usize) -> ConcealmentState {
-        self.conceal_info[channel].conceal_state
     }
 
     /// De-allocates heap allocated memory.

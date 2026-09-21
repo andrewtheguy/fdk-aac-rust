@@ -94,43 +94,19 @@ amm-info@iis.fraunhofer.de
 //! Common utility functions, types and constants shared across multiple modules
 
 pub mod aot;
-#[cfg(feature = "aac_dec")]
-pub mod arith_ops;
-#[cfg(feature = "aac_dec")]
 pub mod audio_channel_type;
-pub mod autocorr2nd;
 pub mod bitbuffer;
 pub mod bitstream;
-#[cfg(feature = "aac_dec")]
 pub mod bs_element_id;
-#[cfg(feature = "aac_dec")]
-pub mod bs_syntax;
-#[cfg(feature = "aac_dec")]
-pub mod channel_config;
 pub mod channel_map_descr;
 pub mod channel_order;
-mod checked_cast;
-pub mod crc;
 pub mod dct;
-#[cfg(feature = "aac_dec")]
-pub mod decorrelator;
 pub mod enums;
 pub mod fft;
-#[cfg(feature = "aac_dec")]
 pub mod flags;
-pub mod hybrid;
-#[cfg(feature = "aac_dec")]
 pub mod ld_filter_bank;
-#[cfg(feature = "aac_dec")]
 pub mod lpc;
-pub mod mdct;
-pub mod mpeg_id;
 pub mod pow;
-pub mod qmf;
-#[cfg(feature = "aac_dec")]
-pub mod qmf_domain;
 pub mod quantize;
 pub mod samplerate_index;
 pub mod tables;
-#[cfg(feature = "aac_dec")]
-pub mod transport_type;

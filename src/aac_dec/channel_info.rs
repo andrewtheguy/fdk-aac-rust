@@ -121,35 +121,6 @@ impl Default for BlockType {
 ///
 /// The Channel_Info holds information of the ICS (individual
 /// channel stream), i.e information about scale factors and windows.
-///
-/// # Examples
-///
-/// Get an instance of IcsInfo and fill it with information from
-/// a bitstream.
-///
-/// ```
-/// use aac::aac_dec::channel_info::IcsInfo;
-/// use aac::aac_dec::sr_info::SamplingRateInfo;
-/// use aac::common::{
-///     bitstream::{Bitstream, Mode},
-///     flags::ACFlags,
-/// };
-///
-/// /// Create SamplingRateInfo
-/// let mut sr_info = SamplingRateInfo::new();
-/// sr_info.init(1024, 3, 48000);
-///
-/// // Create Bitstream
-/// let buffer = vec![0; 8];
-/// let mut bitstream_reader = Bitstream::new(buffer.len(), Mode::Reader);
-/// bitstream_reader.init(&buffer, 32);
-///
-/// // Create ICSInfo
-/// let mut ics_info = IcsInfo::new();
-///
-/// // Read bitstream information into ICSInfo
-/// ics_info.read(&mut bitstream_reader, &sr_info, ACFlags::empty());
-/// ```
 #[derive(Default, Debug, Copy, Clone)]
 #[repr(C)]
 pub struct IcsInfo {
@@ -168,6 +139,7 @@ pub struct IcsInfo {
 /// shape may be set explicitly with setter methods.
 impl IcsInfo {
     /// Create an IcsInfo instance
+    #[cfg(test)]
     pub fn new() -> IcsInfo {
         Default::default()
     }
@@ -190,9 +162,7 @@ impl IcsInfo {
             self.window_sequence = BlockType::Long;
             self.window_shape = WindowShape::Sine;
         } else {
-            if !ac_flags.contains(ACFlags::USAC) {
-                bs.push(1);
-            }
+            bs.push(1);
             self.window_sequence = match bs.read(2) {
                 0 => BlockType::Long,
                 1 => BlockType::Start,
@@ -200,18 +170,6 @@ impl IcsInfo {
                 _ => BlockType::Stop,
             };
             self.window_shape = (bs.read_bit() as u8).into();
-
-            if ac_flags.contains(ACFlags::LD) && self.window_shape != WindowShape::Sine {
-                self.window_shape = WindowShape::LowOverlap;
-            }
-        }
-
-        // Sanity check
-        if ac_flags.intersects(ACFlags::ELD | ACFlags::LD)
-            && self.window_sequence != BlockType::Long
-        {
-            self.window_sequence = BlockType::Long;
-            return AacDecoderError::ParseError;
         }
 
         let error_status = self.read_max_sfb(bs, sampling_rate_info);
@@ -220,9 +178,8 @@ impl IcsInfo {
         }
 
         if self.is_long_block() {
-            if !ac_flags.intersects(ACFlags::ELD | ACFlags::SCALABLE | ACFlags::USAC)
-                && bs.read_bit() != 0
-            // If not ELD nor Scalable nor BSAC nor USAC syntax then ...
+            if !ac_flags.contains(ACFlags::ELD) && bs.read_bit() != 0
+            // If not ELD syntax then ...
             {
                 return AacDecoderError::UnsupportedPrediction;
             }
@@ -365,87 +322,6 @@ impl IcsInfo {
         self.max_sf_bands
     }
 
-    /// Calculate NR for current window
-    pub fn calc_nr(&self, frame_length: usize) -> usize {
-        if self.window_shape == WindowShape::LowOverlap {
-            // Low Overlap, 3/4 zeroed.
-            (frame_length * 3) >> 2
-        } else {
-            0
-        }
-    }
-
-    /// Calculate Window parameters for current window.
-    ///
-    /// # Parameters
-    ///
-    /// - `ics_info`: Individual channel stream info data.
-    /// - `frame_length`: AAC frame length.
-    /// - `prev tl`: TL size of previous window.
-    ///
-    /// # Return
-    ///
-    /// - `tl`: Transform block size.
-    /// - `fl`: Length of left window slope.
-    /// - `fr`: Length of right window slope.
-    /// - `n_spec`: Number of spectra.
-    ///
-    /// # Parameters
-    ///
-    /// - `ics_info`: Individual channel stream info data.
-    /// - `frame_length`: AAC frame length.
-    /// - `prev tl`: TL size of previous window.
-    ///
-    /// # Return
-    ///
-    /// - `tl`: Transform block size.
-    /// - `fl`: Length of left window slope.
-    /// - `fr`: Length of right window slope.
-    /// - `n_spec`: Number of spectra.
-    pub fn get_window_params(
-        &self,
-        frame_length: usize,
-        prev_tl: usize,
-    ) -> (usize, usize, usize, usize) {
-        let tl;
-        let fl;
-        let fr;
-        let n_spec;
-
-        match self.window_sequence() {
-            BlockType::Long => {
-                tl = frame_length;
-                fr = frame_length - self.calc_nr(frame_length);
-                // New startup needs differentiation between sine shape and low overlap
-                // shape. This is a special case for the LD-AAC transformation windows,
-                // because the slope length can be different while using the same window
-                // sequence.
-                fl = if prev_tl == 0 { fr } else { frame_length };
-                n_spec = 1;
-            }
-            BlockType::Stop => {
-                tl = frame_length;
-                fl = frame_length >> 3;
-                fr = frame_length;
-                n_spec = 1;
-            }
-            BlockType::Start => {
-                /* or StopStartSequence */
-                tl = frame_length;
-                fl = frame_length;
-                fr = frame_length >> 3;
-                n_spec = 1;
-            }
-            BlockType::Short => {
-                tl = frame_length >> 3;
-                fl = frame_length >> 3;
-                fr = frame_length >> 3;
-                n_spec = 8;
-            }
-        }
-
-        (tl, fl, fr, n_spec)
-    }
 }
 
 #[cfg(test)]
@@ -480,7 +356,7 @@ mod tests {
 
             assert!(ics_info.is_long_block());
             assert_eq!(ics_info.windows_per_frame(), 1);
-            assert_eq!(ics_info.window_shape(), WindowShape::KBD);
+            assert_eq!(ics_info.window_shape(), WindowShape::Kbd);
             assert_eq!(ics_info.window_sequence(), BlockType::Long);
             assert_eq!(ics_info.n_window_groups(), 1);
             assert_eq!(ics_info.window_group_length(0), 1);

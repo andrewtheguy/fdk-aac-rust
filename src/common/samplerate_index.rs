@@ -99,25 +99,3 @@ pub static SAMPLING_RATE_TABLE: [u32; 32] = [
     0, 0,
 ];
 
-#[inline(always)]
-/// Returns sampling rate index.
-///
-/// # Parameters
-///
-/// - `sampling_rate`: Sampling rate.
-/// - `n_bits`: Number of bits.
-pub fn get_sample_rate_idx(sampling_rate: u32, n_bits: u32) -> u8 {
-    let table_size = 1 << n_bits;
-    let samp_index = SAMPLING_RATE_TABLE
-        .iter()
-        .take(table_size)
-        .position(|&sr| sr == sampling_rate)
-        .unwrap_or(table_size - 1);
-    samp_index as u8
-}
-
-#[test]
-fn test_get_sample_rate_idx() {
-    let sample_rate_idx = get_sample_rate_idx(96000, 10);
-    assert_eq!(sample_rate_idx, 0);
-}

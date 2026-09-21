@@ -619,17 +619,6 @@ static SFB_OFFSET_TABLES: [[SfbInfo; 13]; 5] = [
 ];
 
 /// SamplingRateInfo
-///
-/// # Examples
-///
-/// Get an instance of SamplingRateInfo
-///
-/// ```
-/// use aac::aac_dec::sr_info::SamplingRateInfo;
-///
-/// let mut sr_info = SamplingRateInfo::new();
-/// sr_info.init(1024, 3, 48000);
-/// ```
 #[derive(Default, Debug, Copy, Clone)]
 #[repr(C)]
 pub struct SamplingRateInfo {
@@ -641,6 +630,7 @@ pub struct SamplingRateInfo {
 
 impl SamplingRateInfo {
     /// Create a SamplingRateInfo instance
+    #[cfg(test)]
     pub fn new() -> SamplingRateInfo {
         Default::default()
     }
@@ -714,16 +704,6 @@ impl SamplingRateInfo {
         Ok(())
     }
 
-    /// Get number of total scale factor bands for long block.
-    pub fn n_scale_factor_bands_long(&self) -> usize {
-        self.scale_factor_bands_long.unwrap().len() - 1
-    }
-
-    /// Get number of total scale factor bands for short blocks.
-    pub fn n_scale_factor_bands_short(&self) -> usize {
-        self.scale_factor_bands_short.unwrap().len() - 1
-    }
-
     /// Get scale factor bands for long block.
     pub fn scale_factor_bands_long(&self) -> Option<&'static [u16]> {
         self.scale_factor_bands_long
@@ -734,10 +714,6 @@ impl SamplingRateInfo {
         self.scale_factor_bands_short
     }
 
-    /// Get sampling rate
-    pub fn sampling_rate(&self) -> u32 {
-        self.sampling_rate
-    }
     /// Get sampling rate index value
     pub fn sampling_rate_index(&self) -> usize {
         self.sampling_rate_index
@@ -766,9 +742,7 @@ mod tests {
 
         assert!(Ok(()) == sr_info.init(1024, 4, 44100));
         assert!(49 == sr_info.scale_factor_bands_long().unwrap().len() - 1);
-        assert!(49 == sr_info.n_scale_factor_bands_long());
         assert!(14 == sr_info.scale_factor_bands_short().unwrap().len() - 1);
-        assert!(14 == sr_info.n_scale_factor_bands_short());
 
         assert!(Err(AacDecoderError::UnsupportedFormat) == sr_info.init(1023, 4, 44100));
 

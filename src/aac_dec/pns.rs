@@ -171,14 +171,6 @@ impl PnsData {
     }
 
     /// Re-init PNS data
-    ///
-    /// # Examples
-    /// ```
-    /// use aac::aac_dec::pns::*;
-    ///
-    /// let mut pns: PnsData = Default::default();
-    /// pns.init();
-    /// ```
     pub fn init(&mut self) {
         self.is_pns_active = false;
         self.is_pns_used[..].fill(false);
@@ -192,20 +184,6 @@ impl PnsData {
     /// - `scalefactors`: In buffer (slice) containing the spectral scale factors for each sfb in
     ///   each window.
     /// - `channel`: current channel.
-    ///
-    /// # Examples
-    /// ```
-    /// use aac::aac_dec::{channel_info::*, pns::*};
-    ///
-    /// let mut pns: PnsData = Default::default();
-    /// let mut pns_ic: PnsInterChannelData = Default::default();
-    /// let ics_info: IcsInfo = Default::default();
-    /// let mut spec = vec![0.0_f32; 32];
-    /// let scalefactors = vec![1_i16; 32];
-    /// let ch = 0;
-    ///
-    /// pns.apply(&mut pns_ic, &ics_info, &mut spec, &scalefactors, ch);
-    /// ```
     pub fn apply(
         &self,
         pns_interchannel_data: &mut PnsInterChannelData,
@@ -258,14 +236,12 @@ impl PnsData {
                     .take(ics_info.max_sf_bands())
                     {
                         if *is_pns_used {
-                            let random_state;
-
-                            if channel > 0 && *is_correlated {
-                                random_state = random_seed;
+                            let random_state = if channel > 0 && *is_correlated {
+                                random_seed
                             } else {
                                 *random_seed = pns_interchannel_data.current_seed;
-                                random_state = &mut pns_interchannel_data.current_seed;
-                            }
+                                &mut pns_interchannel_data.current_seed
+                            };
 
                             let spec_start = usize::from(*band_offset_curr);
                             let spec_end = usize::from(*band_offset_next);
@@ -331,13 +307,6 @@ impl PnsData {
 // ---- Methods for PnsInterChannelData struct --//
 impl PnsInterChannelData {
     /// Re-init PNS InterChannel data
-    /// # Examples
-    /// ```
-    /// use aac::aac_dec::pns::*;
-    ///
-    /// let mut pns_ic: PnsInterChannelData = Default::default();
-    /// pns_ic.init();
-    /// ```
     pub fn init(&mut self) {
         self.is_correlated[..].fill(false);
     }
@@ -351,20 +320,6 @@ impl PnsInterChannelData {
     /// - `pnsdata_right`: PnsData of right channel of a channel pair.
     /// - `ms_used`: In/Out buffer (slice) which indicates whether the same random vector is used
     ///   for both channels of a channel pair.
-    /// # Examples
-    /// ```
-    /// use aac::aac_dec::{channel_info::*, pns::*};
-    ///
-    /// let scf_bands = 50;
-    /// let mut ms_used_buff = vec![0_u8; scf_bands]; // will store the output
-    /// let mut ics_info: IcsInfo = Default::default();
-    /// let mut pns_ic: PnsInterChannelData = Default::default();
-    /// let mut pns: Vec<PnsData> = Vec::new();
-    /// pns.push(Default::default()); // L
-    /// pns.push(Default::default()); // R
-    ///
-    /// pns_ic.map_midside_mask_to_pns_correlation(&ics_info, &pns[0], &pns[1], &mut ms_used_buff);
-    /// ```
     pub fn map_midside_mask_to_pns_correlation(
         &mut self,
         ics_info: &IcsInfo,

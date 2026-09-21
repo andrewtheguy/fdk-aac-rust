@@ -93,28 +93,22 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! Enhanced low delay (ELD) specific config
 
-use super::super::{
-    callbacks::TpDecCallBacks,
-    constants::{TPDEC_CORE_SBR_FRAME_LENGTH_INDEX_NONE, TP_USAC_MAX_ELEMENTS},
-    error_codes::TpDecoderError,
-};
-use super::helper_functions::{get_element_list, get_sample_rate, skip_sbr_header};
-use crate::common::aot::AudioObjectType;
-use crate::common::bs_element_id::ChannelElementId;
-use crate::common::enums::StereoCfgIndex;
+use super::super::error_codes::TpDecoderError;
+use super::helper_functions::get_sample_rate;
 use crate::common::{bitstream::Bitstream, flags::ACFlags};
 
-/// ELD extension types.
 #[derive(Debug, PartialEq)]
+/// ELD extension type.
 enum EldExtType {
-    /// Termination tag.
+    /// Terminator.
     Term = 0x0,
-    /// SAOC config.
+    /// Spatial audio object coding (SAOC).
     Saoc = 0x1,
-    /// LD MPEG Surround config.
+    /// Low delay spatial audio coding (MPEG surround).
     Ldsac = 0x2,
-    /// ELD sample rate adaptation.
+    /// Downscale information.
     DownscaleInfo = 0x3,
+    /// Unknown extension type.
     Unknown,
 }
 
@@ -130,284 +124,85 @@ impl From<u32> for EldExtType {
     }
 }
 
-/// ELD specific configuration.
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub(super) struct EldSpecificConfig {
-    /// Use LD-MPS QMF in SBR to achieve time alignment.
-    use_ld_qmf_time_align: bool,
-    sbr_sampling_rate: u8,
-    downscaled_sampling_frequency: u32,
-    downscale_factor: u8,
-}
+/// Parse the ELD specific config.
+///
+/// The error resilience tools (VCB11, RVLC, HCR), low delay SBR, low delay MPEG
+/// surround and the downscaled mode are not decoded here, so a config announcing
+/// one of them is refused.
+///
+/// # Parameters
+///
+/// - `sampling_frequency`: Sampling frequency.
+/// - `ac_flags`: Audio coding flags (see common/flags.rs).
+/// - `bs`: Bitstream instance with valid internal data.
+///
+/// # Return
+///
+/// - `TpDecoderError`.
+pub(super) fn parse(
+    sampling_frequency: u32,
+    ac_flags: &mut ACFlags,
+    bs: &mut Bitstream,
+) -> Result<(), TpDecoderError> {
+    ac_flags.insert(if bs.read_bit() != 0 {
+        ACFlags::FRAME_LENGTH
+    } else {
+        ACFlags::empty()
+    });
 
-impl EldSpecificConfig {
-    /// Clears the ELD Specific Config values.
-    pub(super) fn reset(&mut self) {
-        self.use_ld_qmf_time_align = false;
-        self.sbr_sampling_rate = 0;
-        self.downscaled_sampling_frequency = 0;
-        self.downscale_factor = 0;
+    // aacSectionDataResilienceFlag, aacScalefactorDataResilienceFlag,
+    // aacSpectralDataResilienceFlag and ldSbrPresentFlag
+    if bs.read(4) != 0 {
+        return Err(TpDecoderError::UnsupportedFormat);
     }
 
-    /// Parse the ELD specific config.
-    ///
-    /// # Parameters
-    ///
-    /// - `sampling_frequency`: Sampling frequency.
-    /// - `channel_config`: MPEG-4 channel configuration.
-    /// - `ac_flags`: Audio coding flags (see common/flags.rs).
-    /// - `bs`: Bitstream instance with valid internal data.
-    /// - `cb`: Transport decoder callbacks.
-    pub(super) fn parse(
-        &mut self,
-        sampling_frequency: u32,
-        channel_config: u8,
-        ac_flags: &mut ACFlags,
-        bs: &mut Bitstream,
-        cb: &mut TpDecCallBacks,
-    ) -> Result<(), TpDecoderError> {
-        let mut error_status = Ok(());
+    let mut eld_ext_cnt = 0;
+    let mut eld_ext_type = bs.read(4);
 
-        let mut elements = [ChannelElementId::None; TP_USAC_MAX_ELEMENTS];
+    // Parse ExtTypeConfigData.
+    while EldExtType::from(eld_ext_type) != EldExtType::Term
+        && bs.valid_bits() >= 0
+        && eld_ext_cnt < 15
+    {
+        eld_ext_cnt += 1;
 
-        if get_element_list(channel_config as u32, &mut elements[..]).is_err() {
-            return Err(TpDecoderError::ParseError);
-        }
+        let mut eld_ext_len = bs.read(4);
+        let mut len = eld_ext_len;
 
-        self.reset();
+        if len == 0xf {
+            len = bs.read(8);
+            eld_ext_len += len;
 
-        let eld_specific_config_anchor = bs.valid_bits();
-
-        ac_flags.insert(if bs.read_bit() != 0 {
-            ACFlags::FRAME_LENGTH
-        } else {
-            ACFlags::empty()
-        });
-
-        let sample_per_frame = if ac_flags.contains(ACFlags::FRAME_LENGTH) {
-            480
-        } else {
-            512
-        };
-
-        ac_flags.insert(if bs.read_bit() != 0 {
-            ACFlags::ER_VCB11
-        } else {
-            ACFlags::empty()
-        });
-
-        ac_flags.insert(if bs.read_bit() != 0 {
-            ACFlags::ER_RVLC
-        } else {
-            ACFlags::empty()
-        });
-
-        ac_flags.insert(if bs.read_bit() != 0 {
-            ACFlags::ER_HCR
-        } else {
-            ACFlags::empty()
-        });
-
-        if bs.read_bit() != 0 {
-            ac_flags.insert(ACFlags::SBR_PRESENT);
-            // 0: single rate, 1: dual rate
-            self.sbr_sampling_rate = bs.read_bit() as u8;
-
-            ac_flags.insert(if bs.read_bit() != 0 {
-                ACFlags::SBRCRC
-            } else {
-                ACFlags::empty()
-            });
-
-            // ELD reduced delay mode: LD-SBR initialization has to know the downscale
-            // information. Postpone LD-SBR initialization and read ELD extension
-            // information first.
-            for ele in elements.iter() {
-                if (*ele == ChannelElementId::Sce) || (*ele == ChannelElementId::Cpe) {
-                    skip_sbr_header(bs, false);
-                }
-            }
-        }
-        self.use_ld_qmf_time_align = false;
-        // New ELD syntax.
-        self.downscaled_sampling_frequency = sampling_frequency;
-
-        let mut eld_ext_cnt = 0;
-        let mut eld_ext_type = bs.read(4);
-
-        // Parse ExtTypeConfigData.
-        while EldExtType::from(eld_ext_type) != EldExtType::Term
-            && bs.valid_bits() >= 0
-            && eld_ext_cnt < 15
-        {
-            eld_ext_cnt += 1;
-
-            let mut eld_ext_len = bs.read(4);
-            let mut len = eld_ext_len;
-
-            if len == 0xf {
-                len = bs.read(8);
+            if len == 0xff {
+                len = bs.read(16);
                 eld_ext_len += len;
-
-                if len == 0xff {
-                    len = bs.read(16);
-                    eld_ext_len += len;
-                }
             }
-
-            match EldExtType::from(eld_ext_type) {
-                EldExtType::Ldsac => {
-                    self.use_ld_qmf_time_align = true;
-
-                    error_status = cb.ssc_callback(
-                        bs,
-                        AudioObjectType::AotErAacEld,
-                        sampling_frequency << self.sbr_sampling_rate,
-                        sample_per_frame << self.sbr_sampling_rate,
-                        channel_config,
-                        StereoCfgIndex::Mps212,
-                        TPDEC_CORE_SBR_FRAME_LENGTH_INDEX_NONE,
-                        eld_ext_len,
-                    );
-
-                    if error_status.is_ok() {
-                        ac_flags.insert(ACFlags::MPS_PRESENT);
-                    }
-
-                    if error_status == Err(TpDecoderError::UnsupportedFormat) {
-                        ac_flags.remove(ACFlags::MPS_PRESENT);
-                        error_status = Ok(());
-                    }
-
-                    if error_status.is_err() {
-                        return Err(TpDecoderError::ParseError);
-                    }
-
-                    // ELDv2 w/ ELD downscaled mode not allowed.
-                    if self.downscaled_sampling_frequency != sampling_frequency {
-                        return Err(TpDecoderError::UnsupportedFormat);
-                    }
-                }
-                EldExtType::DownscaleInfo => {
-                    self.downscaled_sampling_frequency = get_sample_rate(bs, None, 4);
-                    if self.downscaled_sampling_frequency == 0 {
-                        return Err(TpDecoderError::ParseError);
-                    }
-
-                    if bs.read(4) != 0x0 {
-                        return Err(TpDecoderError::ParseError);
-                    }
-
-                    // ELDv2 w/ ELD downscaled mode not allowed.
-                    if self.use_ld_qmf_time_align {
-                        return Err(TpDecoderError::UnsupportedFormat);
-                    }
-                }
-                _ => bs.push((eld_ext_len * 8) as isize),
-            };
-
-            eld_ext_type = bs.read(4);
-        }
-        if EldExtType::from(eld_ext_type) != EldExtType::Term {
-            return Err(TpDecoderError::ParseError);
         }
 
-        self.downscale_factor = 1;
-
-        if self.downscaled_sampling_frequency != 0
-            && (sampling_frequency % self.downscaled_sampling_frequency) == 0
-        {
-            let ds_factor = sampling_frequency / self.downscaled_sampling_frequency;
-
-            // frameSize/dsf must be an integer number.
-            if (u32::from(sample_per_frame) % ds_factor) != 0 {
-                return Err(TpDecoderError::UnsupportedFormat);
-            }
-
-            match ds_factor {
-                1 | 2 | 4 => self.downscale_factor = ds_factor as u8,
-                3 => {
-                    if !(ac_flags.contains(ACFlags::SBR_PRESENT)
-                        && ac_flags.contains(ACFlags::FRAME_LENGTH))
-                    {
-                        self.downscale_factor = ds_factor as u8;
-                    }
-                }
-                _ => (),
-            };
-
-            ac_flags.insert(if self.downscale_factor > 1 {
-                ACFlags::ELD_DOWNSCALE
-            } else {
-                ACFlags::empty()
-            });
-        }
-
-        if ac_flags.contains(ACFlags::SBR_PRESENT) {
-            let bs_anchor = bs.valid_bits();
-            bs.push(-(eld_specific_config_anchor - 7 - bs_anchor));
-
-            for (ele_idx, ele) in elements.iter().enumerate() {
-                if ele.is_channel_element()
-                    && cb
-                        .sbr_callback(
-                            bs,
-                            AudioObjectType::AotErAacEld,
-                            *ele,
-                            sampling_frequency / self.downscale_factor as u32,
-                            (sampling_frequency << self.sbr_sampling_rate)
-                                / self.downscale_factor as u32,
-                            sample_per_frame / self.downscale_factor as u16,
-                            ele_idx,
-                            self.downscale_factor,
-                            false,
-                        )
-                        .is_err()
-                {
+        match EldExtType::from(eld_ext_type) {
+            EldExtType::Ldsac => return Err(TpDecoderError::UnsupportedFormat),
+            EldExtType::DownscaleInfo => {
+                let downscaled_sampling_frequency = get_sample_rate(bs, None, 4);
+                if downscaled_sampling_frequency == 0 {
                     return Err(TpDecoderError::ParseError);
                 }
+
+                if bs.read(4) != 0x0 {
+                    return Err(TpDecoderError::ParseError);
+                }
+
+                if downscaled_sampling_frequency != sampling_frequency {
+                    return Err(TpDecoderError::UnsupportedFormat);
+                }
             }
-
-            let num_bits = bs.valid_bits() - bs_anchor;
-            bs.push(num_bits);
-        }
-        error_status
-    }
-
-    /// Returns SBR sampling rate.
-    pub(super) fn sbr_sampling_rate(&self) -> u8 {
-        self.sbr_sampling_rate
-    }
-
-    /// Returns downscale factor.
-    pub(super) fn downscale_factor(&self) -> u8 {
-        self.downscale_factor
-    }
-
-    /// Sets downscale factor.
-    pub(super) fn set_downscale_factor(&mut self, downscale_factor: u8) {
-        self.downscale_factor = downscale_factor;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reset() {
-        let mut eld = EldSpecificConfig {
-            use_ld_qmf_time_align: true,
-            sbr_sampling_rate: 1,
-            downscaled_sampling_frequency: 1,
-            downscale_factor: 1,
+            _ => bs.push((eld_ext_len * 8) as isize),
         };
-        eld.reset();
 
-        assert!(!eld.use_ld_qmf_time_align);
-        assert!(eld.sbr_sampling_rate == 0);
-        assert!(eld.downscaled_sampling_frequency == 0);
-        assert!(eld.downscale_factor == 0);
+        eld_ext_type = bs.read(4);
     }
+    if EldExtType::from(eld_ext_type) != EldExtType::Term {
+        return Err(TpDecoderError::ParseError);
+    }
+
+    Ok(())
 }

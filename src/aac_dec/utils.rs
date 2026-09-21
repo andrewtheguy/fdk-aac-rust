@@ -93,7 +93,6 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! Commonly used data structures and helper functions for AAC decoding
 
-use itertools::izip;
 
 // Code book types
 pub const CBTYPE_ZERO_HCB: u8 = 0;
@@ -102,14 +101,6 @@ pub const CBTYPE_BOOKSCL: u8 = 12;
 pub const CBTYPE_NOISE_HCB: u8 = 13;
 pub const CBTYPE_INTENSITY_HCB2: u8 = 14;
 pub const CBTYPE_INTENSITY_HCB: u8 = 15;
-
-pub fn get_gain(x: &[f32], y: &[f32], n: usize) -> f32 {
-    // Calculate cumulative sums.
-    let corr = 0.00 + izip!(x, y,).take(n).map(|(x, y)| x * y).sum::<f32>();
-    let ener = 1e-6f32 + y.iter().take(n).map(|x| x * x).sum::<f32>();
-
-    corr / ener
-}
 
 // Random noise generator
 pub fn random_noise_generator(seed: &mut u32) -> f32 {
@@ -121,13 +112,3 @@ pub fn random_noise_generator(seed: &mut u32) -> f32 {
 // (ISO/IEC 23003-3 Second edition 2020-06
 // 7.2.4 Generation of random signs for spectral noise filling)
 // returns -1.0_f32 if sign is positive, else 1.0_f32 for negative
-pub fn generate_random_sign(seed: &mut u32) -> f32 {
-    // Note: Don't use return value to decide sign of noise
-    let _ = random_noise_generator(seed);
-
-    if *seed & 0x10000 != 0 {
-        -1.0_f32
-    } else {
-        1.0_f32
-    }
-}

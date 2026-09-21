@@ -105,17 +105,11 @@ pub const MAX_ELEMENTS: usize = MAX_CH_ELEMENTS + 2;
 
 /// Maximum framesize of the core decoder.
 pub const MAX_FRAMESIZE: usize = 1024;
-pub const MAX_BINS_LONG: usize = MAX_FRAMESIZE;
 /// Maximum sample rate.
 pub const MAX_SAMPLERATE: u32 = 384000;
 /// Maximum number of windows (for short blocks).
 pub const MAX_WINDOWS: usize = 8;
 
-pub const MAX_GROUPS: usize = MAX_WINDOWS;
-
 pub const MAX_SFB_SHORT: usize = 16;
-pub const MAX_SFB_LONG: usize = 64;
-
-pub const MAX_GROUPS_X_SFBS: usize = MAX_GROUPS * MAX_SFB_SHORT;
 
 pub const MAX_WINS_X_SFBS: usize = MAX_WINDOWS * MAX_SFB_SHORT;

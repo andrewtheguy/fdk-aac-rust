@@ -118,18 +118,6 @@ pub enum FilterDirection {
 ///   (incremental/decremental).
 /// - `coeff`: Buffer with the LPC filter coefficients.
 /// - `order`: The LPC filter order (size of coeff).
-///
-/// # Examples
-/// ```
-/// use aac::common::lpc::*;
-/// use std::convert::TryInto;
-///
-/// const N: usize = 16;
-/// const FILT_ORD: usize = 4; // LPC_MAX_ORDER as usize;
-/// let mut s: [f32; N] = [0.0; N];
-/// let coeff: [f32; FILT_ORD] = [1.0; FILT_ORD];
-/// lpc_synthesis_lattice(&mut s, FilterDirection::Backward, &coeff);
-/// ```
 pub fn lpc_synthesis_lattice(signal: &mut [f32], direction: FilterDirection, coeff: &[f32]) {
     let order = coeff.len();
     let mut state = [0.0_f32; LPC_MAX_ORDER as usize];

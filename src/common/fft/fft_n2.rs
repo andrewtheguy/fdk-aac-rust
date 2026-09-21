@@ -220,12 +220,12 @@ mod tests {
     // was changed by 180 degree, compared with ROT_VECTOR[].
     #[test]
     fn t_fft_apply_rot_vec() {
-        let rot_vec = &fft_tables::ROT_VECTOR_480;
-        let mut cplx_data = [Complex { re: 1.0, im: 0.0 }; 480]; // max size
+        let rot_vec = &fft_tables::ROT_VECTOR_240;
+        let mut cplx_data = [Complex { re: 1.0, im: 0.0 }; 240]; // max size
 
         // Execute DUT
-        const CL: usize = 32;
-        const N: usize = 32 * 15; // 480
+        const CL: usize = 16;
+        const N: usize = 16 * 15; // 240
         fft_apply_rot_vector(&mut cplx_data[CL..N], CL, rot_vec);
 
         // Test: Check that the phase of the signal is inverted, compared with rot_vec[].

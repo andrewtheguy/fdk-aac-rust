@@ -99,307 +99,124 @@ use crate::common::aot::AudioObjectType;
 use crate::common::audio_channel_type::AudioChannelType;
 use crate::common::bs_element_id::ChannelElementId;
 use crate::common::flags::*;
-use crate::tp_dec::{AudioSpecificConfig, ProgramConfig, UsacExtElementConfig};
+use crate::tp_dec::AudioSpecificConfig;
 use itertools::izip;
 
+/// Element configuration.
 #[repr(C)]
 #[derive(Default, Debug, PartialEq)]
-/// Element configuration
 pub(super) struct ElementConfig {
-    /// Element Id
+    /// Element type.
     pub(super) element_type: ChannelElementId,
-    /// USAC extension element configuration
-    pub(super) extension: UsacExtElementConfig,
-    /// Element specific flags
-    pub(super) el_flags: ChannelFlags,
 }
 
+/// AAC decoder configuration, derived from the parsed ASC.
 #[repr(C)]
 #[derive(Default, Debug)]
-/// AAC decoder configuration
 pub struct Config {
-    /// Element configuration
+    /// Element-wise configuration, such as the element ID and flags.
     pub(super) element_config: [ElementConfig; MAX_ELEMENTS],
-    /// Channel types of all channels
+    /// Audio channel type of each output audio channel.
     pub(super) channel_type: [AudioChannelType; MAX_CHANNELS],
-    /// Channel indices of all channels
+    /// Audio channel index for each output audio channel.
     pub channel_indices: [u8; MAX_CHANNELS],
-    /// Index to access the channelOutputMapping table
+    /// Index to access one line of the channel map table.
     pub channel_map_index: u8,
-    /// Number of elements
+    /// Number of bitstream elements.
     pub(super) num_elements: u8,
-    /// Number of channel elements
+    /// Number of channel elements, i.e. the SCE or the CPE.
     pub(super) num_channel_elements: u8,
-    /// Number of audio channels
+    /// Total number of channels given by the ASC.
     pub num_channels: u8,
-    /// Channel configuration
+    /// Channel config index as given by the ASC.
     pub(super) channel_config: u8,
-    /// Audio codec flags
+    /// Audio codec flags.
     pub ac_flags: ACFlags,
-    /// Audio object type
+    /// Audio object type.
     pub(super) aot: AudioObjectType,
-    /// Extension audio object type
-    pub ext_aot: AudioObjectType,
-    /// Core decoder frame length
+    /// Frame length of the core decoder, which is also the number of samples per
+    /// channel in one decoded frame.
     pub frame_length: u16,
-    /// ELD reduced delay downscale factor
-    pub(super) ds_factor: u8,
-
-    // The following variables describe the decoder output and contain ELD reduced
-    // delay downscale factor if present:
-    /// Number of core decoder output samples
+    /// Samples per output frame.
     pub(super) samples_per_frame: u16,
-    /// Number of samples at decoder output (zero with implicit signalling)
-    pub(super) ext_samples_per_frame: u16,
-    /// Core decoder output sampling frequency
+    /// Sampling frequency of the decoder output.
     pub(super) sampling_frequency: u32,
-    /// Decoder output sampling frequency (zero with implicit signalling)
-    pub(super) ext_sampling_frequency: u32,
-    ///Core decoder sampling frequency index
+    /// Sampling frequency index.
     pub(super) sampling_frequency_index: u8,
 }
 
 impl Config {
-    /// Initializes the AAC decoder configuration based on the provided Audio Specific Config (ASC).
+    /// Initializes the AAC decoder `Config` struct.
     ///
-    /// This function resets the decoder state and configures it according to the ASC. It handles
-    /// both standard AAC and USAC cases, validates channel configurations, sets up channel
-    /// maps, and calculates sampling frequencies. If the ASC specifies unsupported
-    /// configurations, appropriate error codes will be returned.
+    /// # Parameters
     ///
-    /// - Ensure that `asc` is properly configured before calling this function.
-    /// - This function may modify the internal state of the decoder, so it should be used with
-    ///   caution when multiple initializations are performed consecutively.
+    /// - `asc`: Audio specific config, which holds ER AAC ELD in mono or stereo.
+    ///
+    /// # Return
+    ///
+    /// - `Result<(), AacDecoderError>`
     pub fn init(&mut self, asc: &AudioSpecificConfig) -> Result<(), AacDecoderError> {
         *self = Default::default();
 
-        self.num_channels = 0;
-        self.num_channel_elements = 0;
-        self.num_elements = 0;
+        // Build element table: the one channel element, then the ER extension
+        // element and the terminator.
+        let channel_element = match asc.channel_config() {
+            1 => ChannelElementId::Sce,
+            2 => ChannelElementId::Cpe,
+            _ => return Err(AacDecoderError::UnsupportedChannelconfig),
+        };
+        self.element_config[0].element_type = channel_element;
+        self.element_config[1].element_type = ChannelElementId::Ext;
+        self.element_config[2].element_type = ChannelElementId::End;
+        self.num_channel_elements = 1;
+        self.num_elements = 3;
 
-        if !asc.ac_flags().contains(ACFlags::USAC) {
-            // # Initialization for the AAC (non-USAC) case
-            let mut pce = ProgramConfig::new();
+        // Set number of channels.
+        self.num_channels = asc.channel_config();
 
-            // Get channel config.
-            if asc.channel_config() > 0 {
-                if !pce.get_default_mpeg_config(asc.channel_config().into()) {
-                    return Err(AacDecoderError::UnsupportedChannelconfig);
-                }
-            } else {
-                pce = *asc.pce();
-            }
+        // Set channel map index according to given channel config.
+        self.channel_map_index = asc.channel_config();
 
-            // Validate channel config.
-            if !pce.is_valid()
-                || (pce.num_channels() > MAX_CHANNELS as u8)
-                || (pce.num_channels() == 0)
-            {
-                return Err(AacDecoderError::UnsupportedChannelconfig);
-            }
-
-            // Build element table.
-            let mut element_list: [ChannelElementId; MAX_ELEMENTS] = Default::default();
-            self.num_channel_elements = pce.get_element_list(&mut element_list).try_into().unwrap();
-
-            // Set PS and LFE flags where applicable.
-            for (element_cfg, pce_element_cfg) in
-                izip!(self.element_config.iter_mut(), element_list.iter())
-                    .take(self.num_channel_elements as usize)
-            {
-                element_cfg.element_type = *pce_element_cfg;
-                element_cfg.el_flags =
-                    if !asc.ac_flags().contains(ACFlags::ER) && (pce.num_channels() == 1) {
-                        ChannelFlags::PS_POSSIBLE
-                    } else if *pce_element_cfg == ChannelElementId::Lfe {
-                        ChannelFlags::LFE
-                    } else {
-                        ChannelFlags::empty()
-                    };
-
-                self.num_elements += 1;
-            }
-
-            // For AAC ER syntax, set the last element's ID to `ID_EXT`.
-            if asc.ac_flags().contains(ACFlags::ER) {
-                self.element_config[self.num_elements as usize].element_type =
-                    ChannelElementId::Ext;
-                self.num_elements += 1;
-            }
-
-            // Set the last element's ID to `ID_END`.
-            self.element_config[self.num_elements as usize].element_type = ChannelElementId::End;
-            self.num_elements += 1;
-
-            // Set number of channels.
-            self.num_channels = pce.num_channels();
-
-            // Set channel map index according to given channel config.
-            self.channel_map_index = if asc.channel_config() > 0 {
-                asc.channel_config()
-            } else {
-                pce.get_channel_map_index()
-            };
-
-            pce.get_channel_description(&mut self.channel_type, &mut self.channel_indices);
-        } else {
-            // # Initialization for the USAC case
-            let usac_config = asc.usac_config();
-
-            for (i, element_config) in self
-                .element_config
-                .iter_mut()
-                .take(usac_config.num_elements() as usize)
-                .enumerate()
-            {
-                let usac_el_cfg = usac_config.element_config(i);
-                element_config.el_flags = usac_el_cfg.ac_el_flags();
-                element_config.element_type = usac_el_cfg.element_type();
-                element_config.extension = usac_el_cfg.ext_element();
-
-                if usac_el_cfg.element_type().is_channel_element() {
-                    self.num_channels += if usac_el_cfg.element_type() == ChannelElementId::UsacCpe
-                        && !asc.ac_flags().contains(ACFlags::USAC_SCFGI1)
-                    {
-                        2
-                    } else {
-                        1
-                    };
-
-                    self.num_channel_elements += 1;
-                }
-                self.num_elements += 1;
-            }
-
-            // Validate channel config.
-            if (self.num_channels > 2) || (self.num_channels == 0) {
-                return Err(AacDecoderError::UnsupportedChannelconfig);
-            }
-
-            // Set the last element's ID to `ID_END`.
-            self.element_config[self.num_elements as usize].element_type = ChannelElementId::End;
-            self.num_elements += 1;
-
-            self.channel_map_index = asc.channel_config();
-
-            // Set channel description (type and index)
-            for (ch_index, (channel_type, channel_indices)) in izip!(
-                self.channel_type.iter_mut(),
-                self.channel_indices.iter_mut(),
-            )
-            .take(self.num_channels.into())
-            .enumerate()
-            {
-                *channel_type = AudioChannelType::Front;
-                *channel_indices = ch_index as u8;
-            }
+        // Set channel description (type and index)
+        for (ch_index, (channel_type, channel_indices)) in izip!(
+            self.channel_type.iter_mut(),
+            self.channel_indices.iter_mut(),
+        )
+        .take(self.num_channels.into())
+        .enumerate()
+        {
+            *channel_type = AudioChannelType::Front;
+            *channel_indices = ch_index as u8;
         }
 
         self.channel_config = asc.channel_config();
         self.ac_flags = asc.ac_flags();
 
         self.aot = asc.aot();
-        self.ext_aot = asc.extension_aot();
         self.frame_length = asc.samples_per_frame();
-        self.ds_factor = asc.ds_factor();
+        self.samples_per_frame = asc.samples_per_frame();
 
-        // Describe the decoder output including ELD reduced delay downscale factor.
-        self.samples_per_frame = asc.samples_per_frame() / asc.ds_factor() as u16;
-
-        if (asc.extension_sampling_frequency() == 0)
-            && !asc.ac_flags().intersects(ACFlags::USAC | ACFlags::ER)
-        {
-            self.ext_samples_per_frame = 0;
-        } else if asc.extension_sampling_frequency() > 0 {
-            self.ext_samples_per_frame = 0;
-            // SBR ratio for AAC is either 1 or 2.
-            // For USAC, it is 1, 2, 8/3 or 4.
-            if asc.ac_flags().contains(ACFlags::USAC) && asc.samples_per_frame() == 768 {
-                self.ext_samples_per_frame = asc.samples_per_frame() * 8 / 3;
-            } else {
-                let upper_limit = if asc.ac_flags().contains(ACFlags::USAC) {
-                    3
-                } else {
-                    2
-                };
-
-                if let Some(i) = (0..upper_limit).find(|&i| {
-                    asc.sampling_frequency() == (asc.extension_sampling_frequency() >> i)
-                }) {
-                    self.ext_samples_per_frame =
-                        asc.samples_per_frame() * (1 << i) / asc.ds_factor() as u16;
-                }
-            }
-
-            if self.ext_samples_per_frame == 0 {
-                return Err(AacDecoderError::UnsupportedSamplingrate);
-            }
-        } else {
-            self.ext_samples_per_frame = asc.samples_per_frame();
-        }
-
-        self.sampling_frequency = asc.sampling_frequency() / asc.ds_factor() as u32;
-        self.ext_sampling_frequency = asc.extension_sampling_frequency() / asc.ds_factor() as u32;
+        self.sampling_frequency = asc.sampling_frequency();
         self.sampling_frequency_index = asc.sampling_frequency_index();
-
-        // MPEG4 SBR Enhancements are supported only for mono and stereo, and for aac sample rate
-        // equal to or smaller than 24 kHz.
-        if self.ac_flags.contains(ACFlags::MPEG4_ESBR)
-            && ((self.num_channels > 2) || (self.sampling_frequency > 24000))
-        {
-            self.ac_flags.remove(ACFlags::MPEG4_ESBR)
-        }
 
         self.check_sampling_rate()?;
 
         Ok(())
     }
 
-    /// Compares the current AAC decoder configuration with another configuration to determine if
-    /// any significant changes have occurred.
+    /// Compares two AAC decoder config structs and determine whether the decoder's
+    /// configuration has changed.
     ///
-    /// - This function is useful for determining if reinitialization or updates to the decoder are
-    ///   necessary based on configuration changes.
+    /// # Parameters
+    ///
+    /// - `config2`: Another AAC decoder config.
+    ///
+    /// # Return
+    ///
+    /// - `true` if configuration changed, otherwise `false`.
     pub fn is_config_change(&self, config2: &Self) -> bool {
-        // Define audio codec flags to be compared.
-        let mut mask: ACFlags = ACFlags::MPS_PRESENT
-            | ACFlags::SBR_PRESENT
-            | ACFlags::PS_PRESENT
-            | ACFlags::USAC_SCFGI1
-            | ACFlags::USAC_SCFGI2
-            | ACFlags::USAC_SCFGI3;
-
-        if !self.ac_flags.intersects(ACFlags::USAC | ACFlags::ER)
-            && (self.ext_aot == AudioObjectType::AotNullObject)
-        {
-            // Implicit signaling possible.
-            mask.remove(ACFlags::MPS_PRESENT | ACFlags::SBR_PRESENT | ACFlags::PS_PRESENT);
-        }
-
-        // Compare flags.
-        if (self.ac_flags ^ config2.ac_flags) & mask != ACFlags::empty() {
-            return true;
-        }
-
-        if self.ds_factor != config2.ds_factor {
-            return true;
-        }
-
-        if self.ext_sampling_frequency != config2.ext_sampling_frequency {
-            return true;
-        }
-
         if (self.sampling_frequency != config2.sampling_frequency)
             || (self.samples_per_frame != config2.samples_per_frame)
-        {
-            return true;
-        }
-
-        if izip!(
-            self.element_config[..config2.num_elements.into()].iter(),
-            config2.element_config[..config2.num_elements.into()].iter()
-        )
-        .any(|(elem1, elem2)| elem1.element_type != elem2.element_type)
         {
             return true;
         }
@@ -408,58 +225,22 @@ impl Config {
             return true;
         }
 
-        if (self.aot != config2.aot) || (self.ext_aot != config2.ext_aot) {
-            return true;
-        }
-
-        // Check if amount of asc channels has changed.
-        if self.num_channels != config2.num_channels {
+        if self.aot != config2.aot {
             return true;
         }
 
         false
     }
 
-    /// Performs sanity checks on read sampling rate information.
-    ///
-    /// This function checks a given AAC decoder config to hold valid sample rate information.
-    /// For that, next to doing some basic checks, it also uses information about the AOT and
-    /// the extension AOT to validate that the given sample rate is correct.
+    /// Checks if the given sampling frequency is supported.
     fn check_sampling_rate(&self) -> Result<(), AacDecoderError> {
-        // Check if the sampling frequency is zero, which is not allowed.
-        if self.sampling_frequency == 0 {
+        // Verify if the sampling frequency is among the supported values.
+        let supported_frequencies = [
+            96000, 88200, 64000, 16000, 12000, 11025, 8000, 7350, 48000, 44100, 32000, 24000,
+            22050,
+        ];
+        if !supported_frequencies.contains(&self.sampling_frequency) {
             return Err(AacDecoderError::UnsupportedSamplingrate);
-        }
-
-        // Check if the sampling frequency exceeds the maximum allowed value.
-        if (if self.ac_flags.contains(ACFlags::SBR_PRESENT) {
-            self.ext_sampling_frequency
-        } else {
-            self.sampling_frequency
-        }) > 96000
-        {
-            return Err(AacDecoderError::UnsupportedSamplingrate);
-        }
-
-        // AAC-only (i.e. non-USAC) checks
-        if !self.ac_flags.contains(ACFlags::USAC) {
-            // Verify if the sampling frequency is among the supported values.
-            let supported_frequencies = [
-                96000, 88200, 64000, 16000, 12000, 11025, 8000, 7350, 48000, 44100, 32000, 24000,
-                22050,
-            ];
-            if !supported_frequencies.contains(&self.sampling_frequency) {
-                return Err(AacDecoderError::UnsupportedSamplingrate);
-            }
-
-            // For AAC with SBR, the extended sampling frequency must be equal to or double the core
-            // sample rate.
-            if self.ac_flags.contains(ACFlags::SBR_PRESENT)
-                && (self.ext_sampling_frequency != self.sampling_frequency)
-                && (self.ext_sampling_frequency != (2 * self.sampling_frequency))
-            {
-                return Err(AacDecoderError::UnsupportedSamplingrate);
-            }
         }
 
         Ok(())

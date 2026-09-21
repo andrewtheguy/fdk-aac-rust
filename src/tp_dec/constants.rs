@@ -93,32 +93,9 @@ amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! Transport decoder constants
 
-// Next power of two from maximum of bs.escapedValue(4, 4, 8) in audio_pre_roll() (285)
-pub const TP_USAC_MAX_CONFIG_LEN: usize = 512;
-
 // Size is in bytes. 6144 bits * 8 channels = 6144 bytes
 pub const TRANSPORTDEC_INBUF_SIZE: usize = 8192;
-
-// Configuration
-/// Maximum number USAC extension elements.
-const TP_USAC_MAX_EXT_ELEMENTS: usize = 8;
-/// Maximum number USAC channel elements.
-const TP_USAC_MAX_CH_ELEMENTS: usize = 1;
-/// Maximum number USAC elements.
-pub const TP_USAC_MAX_ELEMENTS: usize = TP_USAC_MAX_CH_ELEMENTS + TP_USAC_MAX_EXT_ELEMENTS;
-/// Indicates non-availability of the 3-bit syntax element coreSbrFrameLengthIndex (e.g. in ELD).
-pub(super) const TPDEC_CORE_SBR_FRAME_LENGTH_INDEX_NONE: u8 = 8;
-
-// LATM
-/// Maximum number of programs.
-pub(super) const LATM_MAX_PROG: u8 = 1;
-/// Maximum number of layers.
-pub(super) const LATM_MAX_LAYER: u8 = 1;
-/// Minimum length of LATM header.
-pub(super) const MIN_LATM_HEADERLENGTH: isize = 9;
 
 /// Maximum supported out of band config size in byte.
 pub const MAX_CONF_SIZE: usize = 1024;
 
-/// Sync length in bits.
-pub(super) const ADTS_SYNCLENGTH: isize = 12;

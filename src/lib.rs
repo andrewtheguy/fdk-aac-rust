@@ -91,30 +91,35 @@ Am Wolfsmantel 33
 www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
-//! xHE-AAC/AAC-ELDv2 codec
+//! AAC-ELD decoder
+//!
+//! The decoder of the Fraunhofer FDK AAC Codec Library for Android in Rust, reduced
+//! to one job: ER AAC ELD (MPEG-4 audio object type 39) in mono or stereo, without
+//! SBR, handed over as raw access units with the AudioSpecificConfig out of band.
+//!
+//! ```
+//! use aac::aac_dec::AacDecoderInstance;
+//!
+//! // 48 kHz, stereo, 480-sample frames.
+//! let mut decoder = AacDecoderInstance::new();
+//! decoder.config_raw(&[0xf8, 0xe6, 0x50, 0x00]).unwrap();
+//!
+//! // One frame of interleaved samples, normalised to ±1.
+//! let mut pcm = [0.0f32; 2 * 480];
+//! let access_unit = [0u8; 16];
+//! decoder.fill(&access_unit, access_unit.len()).unwrap();
+//! match decoder.decode(&mut pcm) {
+//!     Ok(info) => assert_eq!((info.frame_size, info.num_channels), (480, 2)),
+//!     // A damaged access unit is concealed: `pcm` holds the substitute frame.
+//!     Err((error, _info)) if error.is_decode_error() => {}
+//!     Err((error, _info)) => panic!("{error:?}"),
+//! }
+//! ```
 
+#![forbid(unsafe_code)]
 #![expect(clippy::approx_constant)]
 #![expect(clippy::excessive_precision)]
 
-#[cfg(feature = "aac_dec")]
 pub mod aac_dec;
-#[cfg(feature = "aac_dec")]
-pub mod arith_coding;
-pub mod common;
-#[cfg(feature = "aac_dec")]
-pub mod drc_dec;
-#[cfg(feature = "aac_dec")]
-pub mod pcm_dmx;
-#[cfg(feature = "aac_dec")]
-pub mod sac_dec;
-#[cfg(feature = "aac_dec")]
-pub mod sbr_dec;
-#[cfg(feature = "aac_dec")]
-pub mod td_limiter;
-#[cfg(feature = "aac_dec")]
-pub mod tp_dec;
-
-#[doc(hidden)]
-pub fn dummy_call() {
-    print!("");
-}
+mod common;
+mod tp_dec;

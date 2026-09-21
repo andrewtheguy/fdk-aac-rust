@@ -92,6 +92,10 @@ www.iis.fraunhofer.de/amm
 amm-info@iis.fraunhofer.de
 ----------------------------------------------------------------------------- */
 //! Bit buffer implementation
+//!
+//! The decoder only reads; the writer half builds the bitstreams the unit tests read.
+
+#![cfg_attr(not(test), allow(dead_code))]
 
 const MAX_BUFSIZE: usize = 1 << (i32::BITS - 2 - 3);
 
@@ -162,14 +166,6 @@ impl Bitbuffer {
         self.valid_bits = valid_bits.try_into().unwrap();
         self.feed_offset = 0;
         self.bit_index = 0;
-    }
-
-    /// Destroys the dynamic allocated Bitbuffer memory
-    pub fn destroy(&mut self) {
-        if self.buffer.capacity() > 0 {
-            self.buffer.clear();
-            self.buffer.shrink_to_fit();
-        }
     }
 
     /// Resets all relevant Bitbuffer states
