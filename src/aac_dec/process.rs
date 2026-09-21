@@ -964,8 +964,6 @@ impl Process {
         // Put the bitbuffer at the end of the `raw_data_block()`.
         tp_dec.bs.push(trailing_bits);
 
-        tp_dec.crc_check().map_err(|_| AacDecoderError::CrcError)?;
-
         Ok(())
     }
 

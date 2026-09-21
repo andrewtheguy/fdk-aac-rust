@@ -132,5 +132,3 @@ pub mod qmf_domain;
 pub mod quantize;
 pub mod samplerate_index;
 pub mod tables;
-#[cfg(feature = "aac_dec")]
-pub mod transport_type;

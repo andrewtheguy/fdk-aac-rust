@@ -132,8 +132,6 @@ const WB_SECTION_SIZE: usize = constants::MAX_FRAMESIZE * 2 * size_of::<u32>();
 const SYNTH_BUF_LENGTH: usize =
     lpd_constants::PIT_MAX_MAX + lpd_constants::SYN_DELAY + lpd_constants::L_FRAME_PLUS;
 
-const ADTS_ERROR_CHECK_REGION1_CRC_BITS: i32 = 192;
-const ADTS_ERROR_CHECK_REGION2_CRC_BITS: i32 = 128;
 
 use bitflags::bitflags;
 
@@ -542,7 +540,6 @@ impl ChannelElement {
         let mut iterate_bs_elements = true;
         let mut ind_sw_cce_flag = false;
         let mut num_gain_element_lists = 0_usize;
-        let (mut crc_reg1, mut crc_reg2) = (-1, -1);
 
         // Get bitstream element list.
         let element_list_option =
@@ -955,25 +952,11 @@ impl ChannelElement {
                             }
                         }
                     }
-                    RdbId::AdtscrcStartReg1 => {
-                        crc_reg1 = tp_dec.crc_start_region(ADTS_ERROR_CHECK_REGION1_CRC_BITS);
-                    }
-                    RdbId::AdtscrcStartReg2 => {
-                        crc_reg2 = tp_dec.crc_start_region(ADTS_ERROR_CHECK_REGION2_CRC_BITS);
-                    }
-
-                    RdbId::AdtscrcEndReg2 => {
-                        if crc_reg1 != -1 {
-                            error = AacDecoderError::DecodeFrameError;
-                        } else {
-                            tp_dec.crc_end_region(crc_reg2);
-                            crc_reg2 = -1;
-                        }
-                    }
-                    RdbId::AdtscrcEndReg1 => {
-                        tp_dec.crc_end_region(crc_reg1);
-                        crc_reg1 = -1;
-                    }
+                    // The CRC regions belong to ADTS, which is not a transport here.
+                    RdbId::AdtscrcStartReg1
+                    | RdbId::AdtscrcStartReg2
+                    | RdbId::AdtscrcEndReg2
+                    | RdbId::AdtscrcEndReg1 => {}
                     RdbId::EndOfSequence | RdbId::NextChannel => {
                         if rdb_id == RdbId::EndOfSequence {
                             iterate_bs_elements = false;
@@ -1076,21 +1059,6 @@ impl ChannelElement {
         } else {
             error = AacDecoderError::UnsupportedFormat;
         } // if let Some(mut element_list) = element_list_option
-
-        // Bail case
-        if crc_reg1 != -1 || crc_reg2 != -1 {
-            if error == AacDecoderError::Ok {
-                error = AacDecoderError::DecodeFrameError;
-            }
-
-            if crc_reg1 != -1 {
-                tp_dec.crc_end_region(crc_reg1);
-            }
-
-            if crc_reg2 != -1 {
-                tp_dec.crc_end_region(crc_reg2);
-            }
-        }
 
         if error == AacDecoderError::Ok {
             // Set state flags (read).

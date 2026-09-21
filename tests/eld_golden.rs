@@ -10,7 +10,7 @@
 //! length and the AudioSpecificConfig, then a length and an access unit, repeated.
 //! They were encoded by the FDK AAC 2.0.3 encoder as AAC-ELD without SBR.
 
-use aac::aac_dec::{AacDecoderInstance, TransportType};
+use aac::aac_dec::AacDecoderInstance;
 use std::{fmt::Write as _, fs, path::Path};
 
 struct Fnv(u64);
@@ -67,7 +67,7 @@ fn damaged(index: usize, unit: &[u8]) -> Vec<u8> {
 
 fn decode(stream: &[u8], damage: bool) -> String {
     let packets = packets(stream);
-    let mut decoder = AacDecoderInstance::new(TransportType::Mp4Raw);
+    let mut decoder = AacDecoderInstance::new();
     decoder.config_raw(packets[0]).expect("the AudioSpecificConfig is accepted");
 
     let mut pcm = vec![0.0f32; 2 * 1024];

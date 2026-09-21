@@ -100,9 +100,7 @@ pub mod constants;
 pub mod error_codes;
 pub mod info;
 pub mod pce;
-pub mod syncer;
 mod tables;
-mod transport_types;
 
 // Re-exports
 pub use {
@@ -116,18 +114,12 @@ pub use {
 };
 
 // Imports
-use crate::{
-    common::{
-        aot::AudioObjectType,
-        bitstream::{Bitstream, Mode},
-        flags::ACFlags,
-        samplerate_index::SAMPLING_RATE_TABLE,
-        transport_type::TransportType,
-    },
-    tp_dec::transport_types::latm::LatmFlags,
+use crate::common::{
+    aot::AudioObjectType,
+    bitstream::{Bitstream, Mode},
+    flags::ACFlags,
 };
-use transport_types::{Adif, Adts, LatmDemux};
-use {constants::ADTS_SYNCLENGTH, info::TpDecInfo, syncer::Syncer};
+use info::TpDecInfo;
 
 // Enums
 /// Reconfiguration states
@@ -184,402 +176,61 @@ enum CfgChangeStatus {
     BuildUp,
 }
 
-#[repr(C)]
-#[derive(PartialEq)]
-/// Transport Decoder parameter.
-pub enum TpDecParam {
-    /// Ignore buffer fullness.
-    IgnoreBufferFullness,
-    /// Reset data.
-    Reset,
-    /// Check for two valid sync words
-    CheckTwoSyncs,
-}
-
 // Structs
 #[derive(Default, Debug)]
 #[repr(C)]
 /// Transport Decoder Data structure.
 pub struct TpDecData {
-    /// MPEG4 transport decoder type.
-    transport_type: TransportType,
-    /// Audio Data Transport Stream (ADTS).
-    adts: Option<Box<Adts>>,
-    /// Audio Data Interchange Format (ADIF).
-    adif: Option<Box<Adif>>,
-    /// Low Overhead Audio Transport Multiplex (LATM).
-    latm: Option<Box<LatmDemux>>,
     /// Audio specific config from the last config found.
     asc: AudioSpecificConfig,
     /// Transport decoder frame info.
     info: TpDecInfo,
-    /// Global transport frame reference bit position.
-    global_frame_position: i32,
-    /// Current number of raw data blocks contained, remaining from the current transport frame.
-    num_raw_data_blocks: u8,
     /// Indicates valid config and successful decoder initialisation.
     is_config_found: bool,
 }
 
 impl TpDecData {
     /// Returns new instance of `TpDecData`.
-    ///
-    /// # Parameters
-    ///
-    /// - `transport_type`: TransportType` format.
-    pub fn new(transport_type: TransportType) -> TpDecData {
-        let mut tpdec_data = TpDecData::default();
-
-        match transport_type {
-            TransportType::Unknown | TransportType::Mp4Raw => (),
-            TransportType::Mp4Adif => tpdec_data.adif = Some(Box::default()),
-            TransportType::Mp4Adts => {
-                let adts = Adts::new();
-                tpdec_data.adts = Some(Box::new(adts));
-            }
-            TransportType::Mp4LatmMcp1 | TransportType::Mp4LatmMcp0 | TransportType::Mp4Loas => {
-                let latm = LatmDemux::new();
-                tpdec_data.latm = Some(Box::new(latm));
-            }
-        };
-
-        tpdec_data
+    pub fn new() -> TpDecData {
+        TpDecData::default()
     }
 
-    /// Initialises `TpDecData`.
-    ///
-    /// # Parameters
-    ///
-    /// - `transport_type`: TransportType` format.
-    ///
-    /// # Return
-    ///
-    /// - `TpDecoderError`.
-    pub(super) fn init(&mut self, transport_type: TransportType) -> Result<(), TpDecoderError> {
-        match transport_type {
-            TransportType::Unknown => {
-                self.deinit();
-                return Err(TpDecoderError::UnknownError);
-            }
-            TransportType::Mp4Raw => (),
-            TransportType::Mp4Adif => (),
-            TransportType::Mp4Adts => {
-                if let Some(adts) = self.adts.as_deref_mut() {
-                    adts.init();
-                }
-            }
-            TransportType::Mp4LatmMcp1 | TransportType::Mp4LatmMcp0 | TransportType::Mp4Loas => {
-                if let Some(latm) = self.latm.as_deref_mut() {
-                    latm.init(transport_type);
-                }
-            }
-        };
 
-        self.transport_type = transport_type;
+    /// Initialises `TpDecData`.
+    pub(super) fn init(&mut self) {
         self.info.init();
         self.asc.init();
-
-        Ok(())
     }
 
     /// Deinitialises `TpDecData`.
     pub fn deinit(&mut self) {
-        self.adts = None;
-        self.adif = None;
-        self.latm = None;
-        self.transport_type = TransportType::Unknown;
         self.asc.reset();
         self.info.reset();
-        self.global_frame_position = 0;
-        self.num_raw_data_blocks = 0;
         self.is_config_found = false;
     }
 
-    /// Reads metadata information about the stream.
+    /// Notes the access unit that was filled into the buffer.
     ///
     /// # Parameters
     ///
     /// - `bs`: Bitstream instance with valid internal data.
-    /// - `cb`: Transport decoder callbacks.
-    /// - `is_ignore_buffer_fullness`: ignore buffer fullness if `true`.
     ///
     /// # Return
     ///
     /// - `TpDecoderError`.
-    fn read_header(
-        &mut self,
-        bs: &mut Bitstream,
-        cb: &mut TpDecCallBacks,
-        is_ignore_buffer_fullness: bool,
-    ) -> Result<(), TpDecoderError> {
+    fn read_header(&mut self, bs: &mut Bitstream) -> Result<(), TpDecoderError> {
         let mut err = Ok(());
 
         if bs.valid_bits() <= 0 {
             err = Err(TpDecoderError::NotEnoughBits);
+        } else if !self.is_config_found {
+            // Decoder needs to be configured with out of band config.
+            err = Err(TpDecoderError::UnknownError);
         } else {
-            match self.transport_type {
-                TransportType::Unknown => err = Err(TpDecoderError::UnsupportedFormat),
-                TransportType::Mp4Raw => {
-                    if !self.is_config_found {
-                        // Decoder needs to be configured with out of band config.
-                        err = Err(TpDecoderError::UnknownError);
-                    } else {
-                        // One Access Unit was filled into buffer, so get the length out of the
-                        // buffer.
-                        self.info.set_au_length(bs.valid_bits().try_into().unwrap());
-                    }
-                }
-                TransportType::Mp4Adif => {
-                    // Read header if not already done.
-                    if !self.is_config_found {
-                        let bs_start = bs.valid_bits();
-
-                        for config_mode in ReconfigState::all() {
-                            if config_mode == ReconfigState::AllocMem {
-                                let num_bits = bs_start - bs.valid_bits();
-                                bs.push(-num_bits);
-                            }
-                            cb.set_config_mode(config_mode);
-
-                            let mut dummy_asc = AudioSpecificConfig::new();
-                            dummy_asc.init();
-
-                            if let Some(adif) = self.adif.as_deref_mut() {
-                                err = adif.read_decode_header(dummy_asc.pce_as_mut(), bs);
-                                // err = adif.read_decode_header(dummy_asc.pce_as_mut(), bs);
-                            }
-
-                            if bs.valid_bits() < 0 {
-                                err = Err(TpDecoderError::NotEnoughBits);
-                            }
-
-                            if err.is_err() {
-                                break;
-                            }
-
-                            // Map adif header to ASC.
-                            let sr_index = dummy_asc.pce().sampling_frequency_index();
-                            dummy_asc.set_aot(AudioObjectType::AotAacLc);
-                            dummy_asc.set_sampling_frequency_index(sr_index);
-                            dummy_asc
-                                .set_sampling_frequency(SAMPLING_RATE_TABLE[usize::from(sr_index)]);
-                            dummy_asc.set_channel_config(0);
-
-                            // Call callback to decoder.
-                            if cb.update_config_callback(&dummy_asc).is_err() {
-                                err = Err(TpDecoderError::ParseError);
-                                break;
-                            }
-                            self.asc = dummy_asc;
-                            self.is_config_found = true;
-
-                            if config_mode == ReconfigState::DetCfgChange
-                                && cb.is_config_changed()
-                                && cb.free_mem_callback().is_err()
-                            {
-                                err = Err(TpDecoderError::ParseError);
-                                break;
-                            }
-                        }
-                    }
-                    // Access Unit data length is unknown.
-                    self.info.set_au_length(-1);
-                }
-                TransportType::Mp4Adts => {
-                    if self.num_raw_data_blocks == 0 {
-                        self.global_frame_position = bs.valid_bits() as i32;
-
-                        for config_mode in ReconfigState::all() {
-                            if config_mode == ReconfigState::AllocMem {
-                                let num_bits =
-                                    self.global_frame_position as isize - bs.valid_bits();
-                                bs.push(-num_bits);
-                            }
-                            cb.set_config_mode(config_mode);
-
-                            let mut dummy_asc = self.asc;
-
-                            if let Some(adts) = self.adts.as_deref_mut() {
-                                err = adts.decode_header(
-                                    &mut dummy_asc,
-                                    bs,
-                                    is_ignore_buffer_fullness,
-                                );
-                                // Parse ADTS header.
-                                // err = adts.decode_header(
-                                //     &mut dummy_asc,
-                                //     bs,
-                                //     is_ignore_buffer_fullness,
-                                // );
-                                if err.is_err() {
-                                    if err != Err(TpDecoderError::NotEnoughBits) {
-                                        err = Err(TpDecoderError::SyncError);
-                                    }
-                                    break;
-                                }
-
-                                // Check if the whole frame would fit the bitstream buffer.
-                                if adts.bs().frame_length() as usize > bs.buffer().len() {
-                                    err = Err(TpDecoderError::SyncError);
-                                    break;
-                                }
-
-                                // Validate explicit frame length and check bitbuffer fill level.
-                                let frame_data_bits = (adts.bs().frame_length() << 3) as isize
-                                    - (self.global_frame_position as isize - bs.valid_bits())
-                                    - ADTS_SYNCLENGTH;
-
-                                if err.is_ok() && frame_data_bits <= 0 {
-                                    err = Err(TpDecoderError::SyncError);
-                                }
-
-                                if bs.valid_bits() < frame_data_bits {
-                                    err = Err(TpDecoderError::NotEnoughBits);
-                                }
-
-                                if err.is_err() {
-                                    break;
-                                }
-
-                                err = cb.update_config_callback(&dummy_asc);
-
-                                if err.is_err() {
-                                    if err != Err(TpDecoderError::NeedToRestart) {
-                                        err = Err(TpDecoderError::SyncError);
-                                    }
-                                    break;
-                                }
-
-                                self.asc = dummy_asc;
-                                self.is_config_found = true;
-                                self.num_raw_data_blocks = adts.bs().num_raw_blocks() + 1;
-
-                                if config_mode == ReconfigState::DetCfgChange
-                                    && cb.is_config_changed()
-                                    && cb.free_mem_callback().is_err()
-                                {
-                                    err = Err(TpDecoderError::ParseError);
-                                    break;
-                                }
-                            }
-                        }
-                    } else {
-                        // Reset CRC because the next bits are the beginning of a raw_data_block().
-                        if let Some(adts) = self.adts.as_deref_mut() {
-                            adts.reset();
-                        }
-                    }
-
-                    if err.is_ok() {
-                        self.num_raw_data_blocks -= 1;
-                        if let Some(adts) = self.adts.as_deref_mut() {
-                            self.info.set_au_length(adts.get_raw_data_block_length(
-                                adts.bs().num_raw_blocks() - self.num_raw_data_blocks,
-                            ))
-                        }
-                    }
-                }
-                TransportType::Mp4LatmMcp1
-                | TransportType::Mp4LatmMcp0
-                | TransportType::Mp4Loas => {
-                    let mut is_break = false;
-
-                    if self.transport_type == TransportType::Mp4Loas
-                        && self.num_raw_data_blocks == 0
-                    {
-                        if let Some(latm) = self.latm.as_deref_mut() {
-                            latm.set_audio_mux_length_bytes(bs.read(13));
-
-                            // Check if the whole frame would fit the bitstream buffer.
-                            if (latm.audio_mux_length_bytes() + 3) as usize > bs.buffer().len() {
-                                err = Err(TpDecoderError::SyncError);
-                                is_break = true;
-                            }
-
-                            // Check if the whole frame is in the bitstream buffer.
-                            if bs.valid_bits() < (latm.audio_mux_length_bytes() << 3) as isize
-                                && !is_break
-                            {
-                                err = Err(TpDecoderError::NotEnoughBits);
-                                is_break = true;
-                            }
-                        }
-                    }
-
-                    if !is_break {
-                        if self.num_raw_data_blocks == 0 {
-                            let mut frame_data_bits = 0;
-                            let mut config_found = self.is_config_found;
-                            self.global_frame_position = bs.valid_bits() as i32;
-
-                            if let Some(latm) = self.latm.as_deref_mut() {
-                                err = latm.read(
-                                    bs,
-                                    cb,
-                                    &mut self.asc,
-                                    &mut config_found,
-                                    is_ignore_buffer_fullness,
-                                );
-
-                                if err.is_err() && err != Err(TpDecoderError::NotEnoughBits) {
-                                    err = Err(TpDecoderError::SyncError);
-                                }
-
-                                if err.is_ok() && self.transport_type == TransportType::Mp4Loas {
-                                    // Validate explicit frame length and check bitbuffer fill
-                                    // level.
-                                    frame_data_bits = (latm.audio_mux_length_bytes() << 3) as i32
-                                        - (self.global_frame_position - bs.valid_bits() as i32);
-
-                                    if frame_data_bits <= 0 {
-                                        err = Err(TpDecoderError::SyncError);
-                                    }
-                                }
-
-                                let bits = if self.transport_type == TransportType::Mp4Loas {
-                                    frame_data_bits as isize
-                                } else {
-                                    0
-                                };
-
-                                if bs.valid_bits() < bits {
-                                    err = Err(TpDecoderError::NotEnoughBits);
-                                }
-
-                                if err.is_ok() {
-                                    self.num_raw_data_blocks = latm.get_num_of_subframes();
-                                    if config_found {
-                                        self.is_config_found = true;
-                                    }
-                                }
-                            }
-                        } else if let Some(latm) = self.latm.as_deref_mut() {
-                            err = latm.read_payload_length_info(bs);
-                            if err.is_err() {
-                                err = Err(TpDecoderError::SyncError);
-                            }
-                        }
-                    }
-
-                    if err.is_ok() {
-                        if let Some(latm) = self.latm.as_deref_mut() {
-                            self.info
-                                .set_au_length(latm.get_frame_length_in_bits() as i32);
-                            self.num_raw_data_blocks -= 1;
-                        }
-                    }
-                }
-            };
-            if err.is_ok() {
-                self.info.set_access_unit_anchor(bs.valid_bits());
-                // In case of known access unit data length check whether bitsream contains a
-                // sufficient numer of bits
-                if (self.info.au_length() > 0)
-                    && (bs.valid_bits() < self.info.au_length().try_into().unwrap())
-                {
-                    err = Err(TpDecoderError::NotEnoughBits);
-                }
-            }
+            // One Access Unit was filled into buffer, so get the length out of the
+            // buffer.
+            self.info.set_au_length(bs.valid_bits().try_into().unwrap());
+            self.info.set_access_unit_anchor(bs.valid_bits());
         }
 
         if err.is_err() {
@@ -591,8 +242,6 @@ impl TpDecData {
 
     /// Resets the `TpDecData`.
     fn reset(&mut self) {
-        self.global_frame_position = 0;
-        self.num_raw_data_blocks = 0;
         self.info.reset();
     }
 }
@@ -607,8 +256,6 @@ pub struct TransportDec {
     cb: TpDecCallBacks,
     /// Control Configuration Change.
     status_config_change: CfgChangeStatus,
-    /// Synchronizer.
-    syncer: Syncer,
     /// Transport Decoder Data.
     pub data: TpDecData,
 }
@@ -620,7 +267,6 @@ impl Default for TransportDec {
             bs: Default::default(),
             cb: Default::default(),
             status_config_change: CfgChangeStatus::Undefined,
-            syncer: Default::default(),
             data: Default::default(),
         }
     }
@@ -628,26 +274,15 @@ impl Default for TransportDec {
 
 impl TransportDec {
     /// Returns new instance of `TransportDec`.
-    ///
-    /// # Parameters
-    ///
-    /// - `transport_type`: `TransportType` format.
-    pub fn new(transport_type: TransportType) -> Self {
-        Self {
-            data: TpDecData::new(transport_type),
-            ..Default::default()
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
+
     /// Initialises `TransportDec`.
-    ///
-    /// # Parameters
-    ///
-    /// - `transport_type`: `TransportType` format.
-    pub fn init(&mut self, transport_type: TransportType) {
+    pub fn init(&mut self) {
         self.bs = Bitstream::new(TRANSPORTDEC_INBUF_SIZE, Mode::Reader);
-        let _ = self.data.init(transport_type);
-        self.syncer.init(transport_type);
+        self.data.init();
         self.status_config_change = CfgChangeStatus::Undefined;
     }
 
@@ -679,42 +314,24 @@ impl TransportDec {
             self.cb.set_config_mode(config_mode);
 
             // Config transport decoder.
-            match self.data.transport_type {
-                TransportType::Mp4LatmMcp1
-                | TransportType::Mp4LatmMcp0
-                | TransportType::Mp4Loas => {
-                    err = if let Some(latm) = self.data.latm.as_deref_mut() {
-                        latm.read_stream_mux_config(
-                            &mut bs,
-                            &mut self.cb,
-                            &mut self.data.asc,
-                            &mut config_found,
-                        )
-                    } else {
-                        Err(TpDecoderError::UnknownError)
-                    };
-                }
-                _ => {
-                    let mut dummy_asc = AudioSpecificConfig::new();
-                    dummy_asc.init();
+            let mut dummy_asc = AudioSpecificConfig::new();
+            dummy_asc.init();
 
-                    err = dummy_asc.parse(
-                        &mut bs,
-                        true,
-                        &mut self.cb,
-                        AudioObjectType::AotNullObject,
-                    );
+            err = dummy_asc.parse(
+                &mut bs,
+                true,
+                &mut self.cb,
+                AudioObjectType::AotNullObject,
+            );
 
-                    if err.is_ok() {
-                        if self.cb.update_config_callback(&dummy_asc).is_err() {
-                            err = Err(TpDecoderError::ParseError);
-                            break;
-                        }
-                        self.data.asc = dummy_asc;
-                        config_found = true;
-                    }
+            if err.is_ok() {
+                if self.cb.update_config_callback(&dummy_asc).is_err() {
+                    err = Err(TpDecoderError::ParseError);
+                    break;
                 }
-            };
+                self.data.asc = dummy_asc;
+                config_found = true;
+            }
 
             if err.is_ok()
                 && (config_mode == ReconfigState::DetCfgChange)
@@ -759,37 +376,15 @@ impl TransportDec {
         is_build_up_on: &mut bool,
         is_startup_phase: bool,
     ) -> Result<(), TpDecoderError> {
-        let mut err = Ok(());
+        let mut err: Result<(), TpDecoderError> = Ok(());
         if self.status_config_change != CfgChangeStatus::FlushOn {
             self.status_config_change = CfgChangeStatus::FlushOn;
             if usize::from(self.data.asc.usac_config().config_length()) == new_config_len
                 && new_config == self.data.asc.usac_config().config_buffer()
             {
-                if let Some(latm) = self.data.latm.as_deref_mut() {
-                    if latm
-                        .flags()
-                        .contains(LatmFlags::USAC_EXPLICIT_CONFIG_CHANGED)
-                    {
-                        latm.remove_flags(LatmFlags::USAC_EXPLICIT_CONFIG_CHANGED);
-                    } else if !is_startup_phase {
-                        // Skip flush, and build_up phase
-                        self.status_config_change = CfgChangeStatus::Undefined;
-                    }
-                } else if !is_startup_phase {
+                if !is_startup_phase {
                     // Skip flush, and build_up phase
                     self.status_config_change = CfgChangeStatus::Undefined;
-                }
-            } else {
-                // ISO/IEC 23003-3:2012/FDAM 3:2016(E) Annex F.2: explicit and implicit
-                // config shall be identical.
-                if let Some(latm) = self.data.latm.as_deref_mut() {
-                    // Reset decoder to initial state to achieve definite behavior after
-                    // error in config.
-                    let _ = self.cb.free_mem_callback();
-                    latm.init(self.data.transport_type);
-                    self.data.reset();
-                    self.status_config_change = CfgChangeStatus::Undefined;
-                    err = Err(TpDecoderError::ParseError);
                 }
             }
 
@@ -859,50 +454,26 @@ impl TransportDec {
         err
     }
 
-    /// Fills internal input buffer with bitstream data from the external input buffer. The
-    /// function only copies such data as long as the decoder-internal input buffer is not full.
-    /// So it grabs whatever it can from buffer and returns information (bytes_valid) so that
-    /// at a subsequent call of fill_data(), the right position in buffer can be determined
-    /// to grab the next data.
+    /// Fills the bitstream buffer with one access unit.
     ///
     /// # Parameters
     ///
-    /// - `buffer`: External input buffer.
-    /// - `bytes_valid`: Number of bitstream bytes in the external bitstream buffer that have not
-    ///   yet been copied into the decoder's internal bitstream buffer.
+    /// - `buffer`: Input buffer holding the access unit.
+    /// - `bytes_valid`: Number of valid bytes in `buffer`.
     ///
     /// # Return
     ///
-    /// - `Result<usize, TpDecoderError>`.
-    ///   - `Ok(usize)`: Number of remaining valid bytes in the external bitstream buffer.
-    ///   - `(usize, TpDecoderError)`: Number of remaining valid bytes with transport decoder error.
+    ///   - `Ok(usize)`: Number of bytes left over, which is always zero.
+    ///   - `Err((usize, TpDecoderError))`: The bytes that did not fit.
     pub fn fill_data(
         &mut self,
         buffer: &[u8],
         bytes_valid: usize,
     ) -> Result<usize, (usize, TpDecoderError)> {
-        let tp_type = self.data.transport_type;
-        let mut valid_bytes = 0;
-        if tp_type == TransportType::Mp4Raw
-            || tp_type == TransportType::Mp4LatmMcp0
-            || tp_type == TransportType::Mp4LatmMcp1
-        {
-            if self.data.num_raw_data_blocks == 0 {
-                self.bs.reset();
-                valid_bytes = self.bs.feed(buffer, bytes_valid);
-                if valid_bytes != 0 {
-                    return Err((valid_bytes, TpDecoderError::TooManyBits));
-                }
-            }
-        } else if bytes_valid == 0 {
-            // Nothing to do.
-            return Ok(valid_bytes);
-        } else {
-            valid_bytes = self.bs.feed(buffer, bytes_valid);
-
-            if self.data.num_raw_data_blocks > 0 {
-                self.data.global_frame_position += (bytes_valid as i32 - valid_bytes as i32) * 8;
-            }
+        self.bs.reset();
+        let valid_bytes = self.bs.feed(buffer, bytes_valid);
+        if valid_bytes != 0 {
+            return Err((valid_bytes, TpDecoderError::TooManyBits));
         }
 
         Ok(valid_bytes)
@@ -913,95 +484,23 @@ impl TransportDec {
         &mut self.cb
     }
 
-    /// Performs bitstream housekeeping. Done after parsing of the access unit.
+    /// Takes the access unit in the buffer as the next one to decode.
     ///
     /// # Return
     ///
-    /// `TpDecoderError`.
-    pub fn end_access_unit(&mut self) -> Result<(), TpDecoderError> {
-        let mut err = Ok(());
-
-        match self.data.transport_type {
-            TransportType::Mp4Adif => {
-                // Make sure that bitbuffer does not get stuck.
-                if self.bs.valid_bits() >= self.data.info.access_unit_anchor() {
-                    self.bs.push(1);
-                }
-
-                // Make sure that raw_data_block() ends with byte alignment.
-                self.bs.align(self.data.info.access_unit_anchor())
-            }
-            TransportType::Mp4Adts => {
-                if let Some(adts) = self.data.adts.as_deref_mut() {
-                    let block_num = adts.bs().num_raw_blocks() - self.data.num_raw_data_blocks;
-
-                    adts.adjust_end_of_access_unit(
-                        &mut self.bs,
-                        block_num,
-                        self.data.info.access_unit_anchor(),
-                        self.data.global_frame_position.try_into().unwrap(),
-                    );
-                }
-            }
-            TransportType::Mp4Loas | TransportType::Mp4LatmMcp1 | TransportType::Mp4LatmMcp0 => {
-                if let Some(latm) = self.data.latm.as_deref_mut() {
-                    err = latm.adjust_end_of_access_unit(
-                        &mut self.bs,
-                        self.data.num_raw_data_blocks == 0,
-                        self.data.global_frame_position as isize,
-                    );
-
-                    if err == Err(TpDecoderError::ParseError) {
-                        self.data.reset();
-                    }
-                }
-            }
-            _ => (),
-        }
-
-        err
-    }
-
-    /// Reads one access unit from the `TransportDec` medium.
-    ///
-    /// # Return
-    ///
-    /// `TpDecoderError`.
+    ///   - `TpDecoderError`.
     pub fn read_access_unit(&mut self) -> Result<(), TpDecoderError> {
-        let mut err;
-
         if self.bs.valid_bits() <= 0 {
             self.data.reset();
             return Err(TpDecoderError::NotEnoughBits);
         }
 
-        if self.data.transport_type == TransportType::Mp4Raw
-            || self.data.transport_type == TransportType::Mp4LatmMcp0
-            || self.data.transport_type == TransportType::Mp4LatmMcp1
-        {
-            err = self.data.read_header(&mut self.bs, &mut self.cb, true);
-            if err == Err(TpDecoderError::NotEnoughBits) {
-                err = Err(TpDecoderError::SyncError);
-            }
-            if err.is_ok() {
-                self.data.reset();
-            }
-        } else {
-            err = self
-                .syncer
-                .synchronise(&mut self.bs, &mut self.data, &mut self.cb);
-
-            if self.data.transport_type == TransportType::Mp4Adts
-                && self
-                    .data
-                    .adts
-                    .as_ref()
-                    .is_some_and(|adts| adts.is_mpeg2_implicit_config())
-                && !self.syncer.is_sync_ok()
-                && err.is_ok()
-            {
-                err = self.determine_implicit_channel_config();
-            }
+        let mut err = self.data.read_header(&mut self.bs);
+        if err == Err(TpDecoderError::NotEnoughBits) {
+            err = Err(TpDecoderError::SyncError);
+        }
+        if err.is_ok() {
+            self.data.reset();
         }
 
         err
@@ -1033,88 +532,10 @@ impl TransportDec {
         &mut self.bs
     }
 
-    /// Sets parameter.
-    ///
-    /// # Parameters
-    ///
-    /// - `param`: Identifier of the parameter to be changed.
-    /// - `value`: Value for the parameter to be changed.
-    ///
-    /// # Return
-    ///
-    /// - `TpDecoderError`.
-    pub fn set_param(&mut self, param: TpDecParam, value: bool) -> Result<(), TpDecoderError> {
-        match param {
-            TpDecParam::IgnoreBufferFullness => {
-                self.syncer.set_is_ignore_buffer_fullness(value);
-            }
-            TpDecParam::Reset => {
-                if value {
-                    self.bs.reset();
-                    self.data.reset();
-                    self.syncer.set_is_sync_ok(false);
-                }
-            }
-            TpDecParam::CheckTwoSyncs => {
-                self.syncer.set_is_check_two_syncs(value);
-            }
-        };
-
-        Ok(())
-    }
-
-    /// Sets current bitstream position as start of a new data region for CRC calculation.
-    ///
-    /// # Parameters
-    ///
-    /// - `m_bits`: Size in bits of the data region. Set to 0 if it should not be of a fixed size.
-    ///
-    /// # Return
-    ///
-    ///   - Data region ID, which should be used when calling `crc_end_region()`.
-    pub fn crc_start_region(&mut self, m_bits: i32) -> i32 {
-        if self.data.transport_type == TransportType::Mp4Adts {
-            if let Some(adts) = self.data.adts.as_deref_mut() {
-                return adts.crc_start_reg(&mut self.bs, m_bits) as i32;
-            }
-        }
-
-        -1
-    }
-
-    /// Sets current bitstream position as end of a data region for CRC calculation.
-    ///
-    /// # Parameters
-    ///
-    /// - `region`: Data region ID, obtained from `crc_start_region()`.
-    pub fn crc_end_region(&mut self, region: i32) {
-        if self.data.transport_type == TransportType::Mp4Adts {
-            if let Some(adts) = self.data.adts.as_deref_mut() {
-                adts.crc_end_reg(&mut self.bs, region as usize);
-            }
-        }
-    }
-
-    /// Calculates ADTS CRC and checks if it is correct. The ADTS checksum is
-    /// held internally.
-    ///
-    /// # Return
-    ///
-    /// - `TpDecoderError`.
-    pub fn crc_check(&mut self) -> Result<(), TpDecoderError> {
-        if self.data.transport_type == TransportType::Mp4Adts {
-            if let Some(adts) = self.data.adts.as_deref_mut() {
-                if adts.bs().num_raw_blocks() > 0 {
-                    self.end_access_unit()
-                } else {
-                    adts.crc_check()
-                }
-            } else {
-                Err(TpDecoderError::UnknownError)
-            }
-        } else {
-            Ok(())
-        }
+    /// Discards the buffered access unit.
+    pub fn reset(&mut self) {
+        self.bs.reset();
+        self.data.reset();
     }
 
     /// Returns the trailing bits of the current access unit.
@@ -1148,81 +569,4 @@ impl TransportDec {
         }
     }
 
-    /// Determines implicit channel configuration.
-    /// In MPEG2 ADTS it is allowed to omit explicit channel configurations. The decoder
-    /// has to use the channel configuration transmitted in access unit as bitstream audio
-    /// element list. The configuration will be detected by trial and error.
-    ///
-    /// # Parameters
-    ///
-    /// # Return
-    ///
-    /// - `TpDecoderError`.
-    pub(super) fn determine_implicit_channel_config(&mut self) -> Result<(), TpDecoderError> {
-        let mut err = Err(TpDecoderError::SyncError);
-
-        // 16 (dual-mono), 21 (2/2 ARIB), 30 (2/1 ARIB), + mpeg channel configs 1-7.
-        static CH_CFG_TABLE: [u32; 10] = [16, 21, 30, 1, 2, 3, 4, 5, 6, 7];
-
-        // Iterate with different channel configurations until decoder is able to
-        // decode first access unit.
-        for channel_config in CH_CFG_TABLE {
-            // Get new PCE and call read_access_unit() again.
-            self.data
-                .asc
-                .pce_as_mut()
-                .get_default_config(channel_config);
-
-            if self.data.asc.pce().is_valid() {
-                // Jump back to synch word and read header.
-                let num_bits = self.data.global_frame_position as isize - self.bs.valid_bits();
-                self.bs.push(-num_bits);
-                self.data.reset();
-
-                if self
-                    .data
-                    .read_header(&mut self.bs, &mut self.cb, true)
-                    .is_ok()
-                {
-                    let mut cb_clone = self.cb.clone();
-                    let cb_err = cb_clone.decode_frame_callback(self);
-                    self.cb = cb_clone;
-                    if cb_err.is_ok() {
-                        // Re-initialize decoder instance after successful decoder setup.
-                        self.cb.set_config_mode(ReconfigState::AllocMem);
-
-                        if self.cb.free_mem_callback().is_err()
-                            || self.cb.update_config_callback(&self.data.asc).is_err()
-                        {
-                            err = Err(TpDecoderError::NeedToRestart);
-                        } else {
-                            // Jump back to access unit.
-                            let num_bits =
-                                self.data.info.access_unit_anchor() - self.bs.valid_bits();
-                            self.bs.push(-num_bits);
-                            err = Ok(())
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        if err.is_err() {
-            // Invalidate program config element.
-            self.data.asc.pce_as_mut().init();
-            if err == Err(TpDecoderError::NotEnoughBits) && self.syncer.rewind(&mut self.bs).is_ok()
-            {
-                return Err(TpDecoderError::NotEnoughBits);
-            }
-            self.syncer.skip(&mut self.bs);
-            // Enforce re-sync of transport headers.
-            self.data.reset();
-            self.syncer.set_is_sync_ok(false);
-        } else {
-            self.syncer.set_is_sync_ok(true);
-        }
-
-        err
-    }
 }

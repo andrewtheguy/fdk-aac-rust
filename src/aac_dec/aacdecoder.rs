@@ -403,12 +403,6 @@ impl AacDecoder {
                         .map_or(true, |ipf| ipf.is_end_access_unit());
 
                 if is_ipf_end_au || (error_status != AacDecoderError::Ok) {
-                    if let Some(tp_dec) = tp_dec_option.as_deref_mut() {
-                        if tp_dec.end_access_unit().is_err() {
-                            flags_cf.insert(AACDecFlags::CONCEAL);
-                            error_status = AacDecoderError::DecodeFrameError;
-                        }
-                    }
                     is_end_access_unit = true;
                 }
 

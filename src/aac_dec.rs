@@ -140,7 +140,6 @@ pub use crate::{
     common::{
         aot::AudioObjectType, audio_channel_type::AudioChannelType,
         bs_element_id::ChannelElementId, channel_order::ChannelOrder, flags::ACFlags,
-        transport_type::TransportType,
     },
     drc_dec::DrcEffectTypeRequest,
     pcm_dmx::DualChannelMode,
@@ -151,7 +150,7 @@ pub use crate::{
 use crate::{
     aac_dec::{aacdecoder::AacDecoder, conceal::A_CONCEAL_AU, ipf::IpfData, params::Params},
     common::{bitstream::Bitstream, flags::AACDecFlags},
-    tp_dec::{callbacks::TpDecCb, TpDecParam, TransportDec},
+    tp_dec::{callbacks::TpDecCb, TransportDec},
 };
 use std::{cell::RefCell, ops::DerefMut, rc::Rc};
 
@@ -174,15 +173,15 @@ pub struct AacDecoderInstance {
 
 impl AacDecoderInstance {
     /// Creates a new `AacDecoderInstance` instance.
-    pub fn new(transport_type: TransportType) -> AacDecoderInstance {
+    pub fn new() -> AacDecoderInstance {
         let mut aac_decoder_instance = AacDecoderInstance {
             params: Params::new(),
             aac_decoder: Rc::new(RefCell::new(AacDecoder::new())),
-            transport_decoder: Box::new(TransportDec::new(transport_type)),
+            transport_decoder: Box::new(TransportDec::new()),
             ipf_data: None,
         };
 
-        aac_decoder_instance.transport_decoder.init(transport_type);
+        aac_decoder_instance.transport_decoder.init();
         aac_decoder_instance.params.init();
         aac_decoder_instance.register_callbacks();
 
@@ -318,14 +317,6 @@ impl AacDecoderInstance {
                 }
             }
 
-            // Finalize transport frame in case this has not yet been done.
-            if (error_status != AacDecoderError::NotEnoughBits)
-                && error_status != AacDecoderError::TransportSyncError
-            {
-                if let Err(err) = self.transport_decoder.end_access_unit() {
-                    error_status = err.into();
-                }
-            }
         }
 
         let mut refcell_aac_dec = self.aac_decoder.borrow_mut();
@@ -404,15 +395,8 @@ impl AacDecoderInstance {
     ///
     /// - `Result<(), AacDecoderError>`.
     pub fn clear(&mut self) -> Result<(), AacDecoderError> {
-        if self
-            .transport_decoder
-            .set_param(TpDecParam::Reset, true)
-            .is_err()
-        {
-            Err(AacDecoderError::SetParamFail)
-        } else {
-            Ok(())
-        }
+        self.transport_decoder.reset();
+        Ok(())
     }
 
     /// Returns true if the AU concealment byte sequence is found in the given bitstream. See
@@ -463,31 +447,7 @@ impl AacDecoderInstance {
     ///
     /// - `Result<(), AacDecoderError>`.
     pub fn set_param(&mut self, param: Param) -> Result<(), AacDecoderError> {
-        let mut err = Ok(());
-        match param {
-            Param::TpdecParamIgnoreBufferFullness(value) => {
-                if self
-                    .transport_decoder
-                    .set_param(TpDecParam::IgnoreBufferFullness, value)
-                    .is_err()
-                {
-                    err = Err(AacDecoderError::SetParamFail);
-                }
-            }
-            Param::TpdecCheckTwoSyncs(value) => {
-                if self
-                    .transport_decoder
-                    .set_param(TpDecParam::CheckTwoSyncs, value)
-                    .is_err()
-                {
-                    err = Err(AacDecoderError::SetParamFail);
-                }
-            }
-            _ => {
-                err = self.params.set_param(param);
-            }
-        }
-        err
+        self.params.set_param(param)
     }
 
     /// Flushes all filterbanks to get all delayed audio without having new input

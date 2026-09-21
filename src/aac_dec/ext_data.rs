@@ -1033,11 +1033,8 @@ impl ExtensionData {
         let mut tmp_pce = ProgramConfig::new();
         tmp_pce.init();
 
-        let crc_reg = tp_dec.crc_start_region(0);
         let bs = tp_dec.bs_mut();
         tmp_pce.read(bs, align_anchor);
-
-        tp_dec.crc_end_region(crc_reg);
 
         if tmp_pce.is_valid() {
             // Store matrix mixdown info in static pce.
@@ -1213,7 +1210,6 @@ impl ExtensionData {
         channel_element_count: u8,
         align_anchor: isize,
     ) -> Result<(), AacDecoderError> {
-        let crc_reg = tp_dec.crc_start_region(0);
         let bs = tp_dec.bs_mut();
 
         let element_instance_tag = bs.read(4) as u8;
@@ -1280,8 +1276,6 @@ impl ExtensionData {
             let valid_bits = bs.valid_bits();
             bs.push(valid_bits - data_start + data_len_bits);
         }
-
-        tp_dec.crc_end_region(crc_reg);
 
         Ok(())
     }
